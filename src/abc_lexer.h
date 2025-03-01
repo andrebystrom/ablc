@@ -1,9 +1,15 @@
+/***
+ * abc_lexer.h
+ *
+ * Lex a file into tokens.
+ */
+
 #ifndef ABC_LEXER_H
 #define ABC_LEXER_H
 
 #include <stdbool.h>
-#include <stdio.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include "data/abc_arr.h"
 
@@ -13,6 +19,7 @@ struct abc_lexer {
     FILE *file;
     int line;
 
+    // Scratch area.
     uint8_t buf[ABC_LEXER_BUFFER_SIZE];
     int buf_pos;
 
@@ -54,7 +61,7 @@ enum abc_token_type {
 };
 
 struct abc_token {
-	enum abc_token_type type;
+    enum abc_token_type type;
     int line;
     // Not present for TOKEN_ERROR
     char *lexeme;
@@ -62,12 +69,31 @@ struct abc_token {
     void *data;
 };
 
+/**
+ * Initializes the lexer.
+ * @param lexer the lexer.
+ * @param filename the file to lex.
+ * @return true on success, false otherwise.
+ */
 bool abc_lexer_init(struct abc_lexer *lexer, const char *filename);
 
+/**
+ * Lexes the next token.
+ * @param lexer the lexer.
+ * @return a token, when EOF is reached the type is TOKEN_EOF.
+ */
 struct abc_token abc_lexer_next_token(struct abc_lexer *lexer);
 
+/**
+ * Destroys a token, called when ready to discard a token.
+ * @param token the token.
+ */
 void abc_lexer_token_free(struct abc_token *token);
 
+/**
+ * Destroys the lexer, closing the file etc.
+ * @param lexer the lexer to destroy.
+ */
 void abc_lexer_destroy(struct abc_lexer *lexer);
 
-#endif //ABC_LEXER_H
+#endif // ABC_LEXER_H
