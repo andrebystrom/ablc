@@ -1,0 +1,16 @@
+Prog -> FunDecl*                                              // Program is a list of FunDecl
+FunDecl -> Type Literal "(" (Type Literal)* ")" "{" Decl* "}" // fun decl
+Decl -> Type Literal ("=" Literal)? ";"                       // var decl
+        | Statement
+Statement -> Expr ";"                                         // ExprStmt
+            | "if" "(" Expr ")" Statement ("else" Statement)? // if stmt
+            | "{" Decl* "}"                                   // block stmt
+            | "while" "(" Expr ")" Statement                  // while stmt
+            | "return"  Expr? ";"                             // ret stmt
+Expr -> Expr Binop Expr                                       // binary
+Expr -> ("+" | "-") Expr                                      // unary
+Expr -> Literal "(" Expr* ")"                                 // call
+Expr -> Literal | Grouping                                    // primary/leaf
+Binop -> "+" | "-" | "*" | "/" | ">" | "<" | ">=" | "<=" | "==" | "!=" | "=" | "or" | "and"
+Literal -> INT | ID
+Type -> "int" | "void"
