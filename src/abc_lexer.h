@@ -11,8 +11,6 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include "data/abc_arr.h"
-
 #define ABC_LEXER_BUFFER_SIZE 1024
 
 struct abc_lexer {

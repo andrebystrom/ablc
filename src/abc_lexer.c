@@ -10,8 +10,6 @@
 #include <errno.h>
 #include <limits.h>
 
-#include "data/abc_arr.h"
-
 static void max_munch(const struct abc_lexer *lexer, enum abc_token_type type, char start, struct abc_token *token);
 static bool match(const struct abc_lexer *lexer, char c);
 static void lex_int(struct abc_lexer *lexer, uint8_t start, struct abc_token *token);
