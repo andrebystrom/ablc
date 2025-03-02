@@ -6,10 +6,12 @@ Statement -> Expr ";"                                         // ExprStmt
             | "if" "(" Expr ")" Statement ("else" Statement)? // if stmt
             | "{" Decl* "}"                                   // block stmt
             | "while" "(" Expr ")" Statement                  // while stmt
+            | "print" "(" Expr ")" ";"                        // print stmt
             | "return"  Expr? ";"                             // ret stmt
 Expr -> Expr Binop Expr                                       // binary
 Expr -> ("+" | "-") Expr                                      // unary
 Expr -> Literal "(" Expr* ")"                                 // call
+Expr -> Literal "=" Expr                                      // assign
 Expr -> Literal | Grouping                                    // primary/leaf
 Binop -> "+" | "-" | "*" | "/" | ">" | "<" | ">=" | "<=" | "==" | "!=" | "=" | "or" | "and"
 Literal -> INT | ID
