@@ -14,7 +14,7 @@ struct abc_program abc_parser_parse(struct abc_parser *parser) {
     abc_arr_init(&program.fun_decls, sizeof (struct abc_fun_decl));
 
     struct abc_token token;
-    while((token = abc_lexer_next_token(parser->lexer)).type != TOKEN_EOF) {
+    while((token = abc_lexer_peek(parser->lexer)).type != TOKEN_EOF) {
 
     }
 
