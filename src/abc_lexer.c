@@ -21,7 +21,7 @@ static char *my_strdup(const uint8_t *src, int len) {
         perror(__FILE__ ": strndup");
         exit(EXIT_FAILURE);
     }
-    strncpy(result, (char *)src, len);
+    strncpy(result, (char *) src, len);
     result[len] = '\0';
     return result;
 }
@@ -42,6 +42,8 @@ bool abc_lexer_init(struct abc_lexer *lexer, const char *filename) {
 
     lexer->buf_pos = 0;
 
+    lexer->has_peek = lexer->is_eof = false;
+
     return true;
 }
 
@@ -49,6 +51,14 @@ struct abc_token abc_lexer_next_token(struct abc_lexer *lexer) {
     struct abc_token result = {0};
     uint8_t ch;
     int tmpch;
+
+    if (lexer->is_eof) {
+        result.type = TOKEN_EOF;
+        result.line = lexer->line;
+        return result;
+    }
+    lexer->has_peek = false;
+
     while ((tmpch = fgetc(lexer->file)) != EOF) {
         ch = (uint8_t) tmpch;
         lexer->buf_pos = 0;
@@ -118,9 +128,18 @@ struct abc_token abc_lexer_next_token(struct abc_lexer *lexer) {
         return result;
     }
 
+    lexer->is_eof = true;
     result.line = lexer->line;
     result.type = TOKEN_EOF;
     return result;
+}
+
+struct abc_token abc_lexer_peek(struct abc_lexer *lexer) {
+    if (lexer->has_peek) {
+        return lexer->peeked;
+    }
+    lexer->has_peek = true;
+    return lexer->peeked = abc_lexer_next_token(lexer);
 }
 
 static void max_munch(const struct abc_lexer *lexer, const enum abc_token_type type, const char start,
@@ -130,10 +149,10 @@ static void max_munch(const struct abc_lexer *lexer, const enum abc_token_type t
     if (match(lexer, '=')) {
         buf[1] = '=';
         token->type = type + 1;
-        token->lexeme = my_strdup((uint8_t *)buf, 2);
+        token->lexeme = my_strdup((uint8_t *) buf, 2);
     } else {
         token->type = type;
-        token->lexeme = my_strdup((uint8_t *)buf, 1);
+        token->lexeme = my_strdup((uint8_t *) buf, 1);
     }
 }
 
@@ -162,7 +181,7 @@ static void lex_int(struct abc_lexer *lexer, uint8_t start, struct abc_token *to
 
     errno = 0;
     char *endptr;
-    long res = strtol((char *)lexer->buf, &endptr, 10);
+    long res = strtol((char *) lexer->buf, &endptr, 10);
     if (*endptr != '\0' || errno != 0) {
         goto err;
     }
@@ -206,7 +225,7 @@ static void lex_keyword_or_identifier(struct abc_lexer *lexer, uint8_t start, st
     }
 
     token->lexeme = my_strdup(lexer->buf, lexer->buf_pos);
-    char *buf = (char *)lexer->buf;
+    char *buf = (char *) lexer->buf;
     if (strncmp(buf, "if", lexer->buf_pos) == 0) {
         token->type = TOKEN_IF;
     } else if (strncmp(buf, "else", lexer->buf_pos) == 0) {

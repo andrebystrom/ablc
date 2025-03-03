@@ -13,17 +13,6 @@
 
 #define ABC_LEXER_BUFFER_SIZE 1024
 
-struct abc_lexer {
-    FILE *file;
-    int line;
-
-    // Scratch area.
-    uint8_t buf[ABC_LEXER_BUFFER_SIZE];
-    int buf_pos;
-
-    bool has_error;
-};
-
 // Order for TOKEN_X, TOKEN_X_EQUALS matter for lexer.
 enum abc_token_type {
     TOKEN_EQUALS,
@@ -67,6 +56,22 @@ struct abc_token {
     void *data;
 };
 
+struct abc_lexer {
+    FILE *file;
+    int line;
+
+    // Scratch area.
+    uint8_t buf[ABC_LEXER_BUFFER_SIZE];
+    int buf_pos;
+
+    bool has_error;
+
+    bool has_peek;
+    struct abc_token peeked;
+
+    bool is_eof;
+};
+
 /**
  * Initializes the lexer.
  * @param lexer the lexer.
@@ -81,6 +86,14 @@ bool abc_lexer_init(struct abc_lexer *lexer, const char *filename);
  * @return a token, when EOF is reached the type is TOKEN_EOF.
  */
 struct abc_token abc_lexer_next_token(struct abc_lexer *lexer);
+
+/**
+ * Peeks 1 token. Subsequent calls to peek will return the same token
+ * until it is consumed by abc_lexer_next_token.
+ * @param lexer the lexer.
+ * @return the peeked token.
+ */
+struct abc_token abc_lexer_peek(struct abc_lexer *lexer);
 
 /**
  * Destroys a token, called when ready to discard a token.
