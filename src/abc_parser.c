@@ -24,6 +24,7 @@ struct abc_program abc_parser_parse(struct abc_parser *parser) {
 static struct abc_fun_decl parse_fun_decl(struct abc_parser *parser) {
     struct abc_fun_decl fun_decl;
     abc_arr_init(&fun_decl.params, sizeof (struct abc_param));
+    abc_arr_init(&fun_decl.decls, sizeof (struct abc_fun_decl));
 
     return fun_decl;
 }

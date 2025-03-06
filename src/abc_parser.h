@@ -175,12 +175,6 @@ struct abc_decl {
 // END DECL
 
 // BEGIN ROOT
-
-struct abc_program {
-    // List of abc_fun_decl
-    struct abc_arr fun_decls;
-};
-
 struct abc_fun_decl {
     enum abc_type type;
     struct abc_token name;
@@ -188,6 +182,11 @@ struct abc_fun_decl {
     struct abc_arr params;
     // list of abc_decl
     struct abc_arr decls;
+};
+
+struct abc_program {
+    // List of abc_fun_decl
+    struct abc_arr fun_decls;
 };
 
 // END ROOT
