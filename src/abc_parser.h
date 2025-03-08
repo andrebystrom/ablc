@@ -180,8 +180,7 @@ struct abc_fun_decl {
     struct abc_token name;
     // list of abc_param
     struct abc_arr params;
-    // list of abc_decl
-    struct abc_arr decls;
+    struct abc_block_stmt body;
 };
 
 struct abc_program {

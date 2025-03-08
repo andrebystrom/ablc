@@ -7,7 +7,8 @@ add_global_arguments('-Db_sanitize=address', '-Db_sanitize=leak', '-Db_sanitize=
 sources = [
         'src/main.c',
         'src/data/abc_arr.c',
-        'src/abc_lexer.c'
+        'src/abc_lexer.c',
+        'src/abc_parser.c'
 ]
 
 ablc = executable('ablc', sources)
