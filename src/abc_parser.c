@@ -2,7 +2,14 @@
 #include "abc_lexer.h"
 #include "data/abc_arr.h"
 
+// TODO: make sure to call token_free where appropriate
+
 static bool parse_fun_decl(struct abc_parser *parser, struct abc_fun_decl *fun_decl);
+
+static bool parse_decl(struct abc_parser *parser, struct abc_decl *decl);
+
+static bool parse_var_decl(struct abc_parser *parser, struct abc_decl *decl);
+
 static bool parse_block_stmt(struct abc_parser *parser, struct abc_block_stmt *block);
 
 static void synchronize(struct abc_parser *parser) {
@@ -81,6 +88,40 @@ static bool parse_fun_decl(struct abc_parser *parser, struct abc_fun_decl *fun_d
     }
 
     return parse_block_stmt(parser, &fun_decl->body);
+}
+
+static bool parse_decl(struct abc_parser *parser, struct abc_decl *decl) {
+    struct abc_token token = abc_lexer_peek(parser->lexer);
+    if (token.type == TOKEN_VOID_TYPE || token.type == TOKEN_INT_TYPE) {
+        return parse_var_decl(parser, decl);
+    } else {
+        return false; // TODO parse_stmt
+    }
+}
+
+static bool parse_var_decl(struct abc_parser *parser, struct abc_decl *decl) {
+    decl->tag = ABC_DECL_VAR;
+
+    struct abc_token type_token = abc_lexer_next_token(parser->lexer);
+    struct abc_token id = abc_lexer_peek(parser->lexer);
+    if (id.type != TOKEN_IDENTIFIER) {
+        fprintf(stderr, "expected identifier, got %s\n", id.lexeme);
+        return false;
+    }
+    abc_lexer_next_token(parser->lexer);
+
+    decl->val.var.type = type_token.type == TOKEN_INT_TYPE ? ABC_TYPE_INT : ABC_TYPE_VOID;
+    decl->val.var.name = id;
+
+    if (abc_lexer_peek(parser->lexer).type != TOKEN_EQUALS) {
+        decl->val.var.has_init = false;
+        return true;
+    }
+    abc_lexer_next_token(parser->lexer);
+
+    decl->val.var.has_init = true;
+    decl->val.var.init = {}; // TODO parse expr
+    return match_token(parser, TOKEN_SEMICOLON);
 }
 
 static bool parse_block_stmt(struct abc_parser *parser, struct abc_block_stmt *block) {

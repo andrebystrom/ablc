@@ -157,7 +157,7 @@ struct abc_var_decl {
     struct abc_token name;
     bool has_init;
     // valid if has_init == true
-	struct abc_lit init;
+	struct abc_expr init;
 };
 
 struct abc_stmt_decl {
