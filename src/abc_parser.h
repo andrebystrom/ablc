@@ -99,6 +99,7 @@ enum abc_stmt_tag {
     ABC_STMT_IF,
     ABC_STMT_WHILE,
     ABC_STMT_BLOCK,
+    ABC_STMT_PRINT,
     ABC_STMT_RETURN
 };
 
@@ -119,7 +120,7 @@ struct abc_while_stmt {
 };
 
 struct abc_block_stmt {
-    struct abc_arr stmts;
+    struct abc_arr decls;
 };
 
 struct abc_print_stmt {
