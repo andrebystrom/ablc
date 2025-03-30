@@ -1,3 +1,7 @@
+/**
+ * parse tree where only expressions, the branches of if statements, and the body of while loops are heap
+ * allocated.
+*/
 #ifndef ABC_PARSER_H
 #define ABC_PARSER_H
 
@@ -10,6 +14,15 @@
 struct abc_expr;
 
 // misc
+
+static void *abc_malloc(const size_t size) {
+    void *p = malloc(size);
+    if (p == NULL) {
+        fprintf(stderr, "Out of memory\n");
+        exit(EXIT_FAILURE);
+    }
+    return p;
+}
 
 enum abc_type {
     ABC_TYPE_VOID,
@@ -79,9 +92,9 @@ struct abc_assign_expr {
 };
 
 struct abc_expr {
-	enum abc_expr_tag tag;
+    enum abc_expr_tag tag;
     union {
-		struct abc_bin_expr bin_expr;
+        struct abc_bin_expr bin_expr;
         struct abc_unary_expr unary_expr;
         struct abc_call_expr call_expr;
         struct abc_grouping_expr grouping_expr;
@@ -89,6 +102,57 @@ struct abc_expr {
         struct abc_assign_expr assign_expr;
     } val;
 };
+
+inline struct abc_expr *abc_expr(void) {
+    return abc_malloc(sizeof(struct abc_expr));
+}
+
+inline struct abc_expr *abc_bin_expr(struct abc_token op, struct abc_expr *left, struct abc_expr *right) {
+    struct abc_expr *ret = abc_malloc(sizeof(struct abc_expr));
+    ret->tag = ABC_EXPR_BINARY;
+    ret->val.bin_expr.op = op;
+    ret->val.bin_expr.left = left;
+    ret->val.bin_expr.right = right;
+    return ret;
+}
+
+inline struct abc_expr *abc_unary_expr(struct abc_token op, struct abc_expr *expr) {
+    struct abc_expr *ret = abc_malloc(sizeof(struct abc_expr));
+    ret->tag = ABC_EXPR_UNARY;
+    ret->val.unary_expr.op = op;
+    ret->val.unary_expr.expr = expr;
+    return ret;
+}
+
+inline struct abc_expr *abc_call_expr(struct abc_lit callee, struct abc_arr args) {
+    struct abc_expr *ret = abc_malloc(sizeof(struct abc_expr));
+    ret->tag = ABC_EXPR_CALL;
+    ret->val.call_expr.callee = callee;
+    ret->val.call_expr.args = args;
+    return ret;
+}
+
+inline struct abc_expr *abc_grouping_expr(struct abc_expr *expr) {
+    struct abc_expr *ret = abc_malloc(sizeof(struct abc_expr));
+    ret->tag = ABC_EXPR_GROUPING;
+    ret->val.grouping_expr.expr = expr;
+    return ret;
+}
+
+inline struct abc_expr *abc_lit_expr(struct abc_lit lit) {
+    struct abc_expr *ret = abc_malloc(sizeof(struct abc_expr));
+    ret->tag = ABC_EXPR_LITERAL;
+    ret->val.lit_expr.lit = lit;
+    return ret;
+}
+
+inline struct abc_expr *abc_assign_expr(struct abc_lit lit, struct abc_expr *expr) {
+    struct abc_expr *ret = abc_malloc(sizeof(struct abc_expr));
+    ret->tag = ABC_EXPR_ASSIGN;
+    ret->val.assign_expr.lit = lit;
+    ret->val.assign_expr.expr = expr;
+    return ret;
+}
 
 // END EXPR
 
@@ -104,18 +168,18 @@ enum abc_stmt_tag {
 };
 
 struct abc_expr_stmt {
-    struct abc_expr expr;
+    struct abc_expr *expr;
 };
 
 struct abc_if_stmt {
-    struct abc_expr cond;
+    struct abc_expr *cond;
     struct abc_stmt *then_stmt;
     bool has_else;
     struct abc_stmt *else_stmt;
 };
 
 struct abc_while_stmt {
-    struct abc_expr cond;
+    struct abc_expr *cond;
     struct abc_stmt *then;
 };
 
@@ -124,7 +188,7 @@ struct abc_block_stmt {
 };
 
 struct abc_print_stmt {
-    struct abc_expr expr;
+    struct abc_expr *expr;
 };
 
 struct abc_return_stmt {
@@ -144,6 +208,10 @@ struct abc_stmt {
     } val;
 };
 
+inline struct abc_stmt *abc_stmt(void) {
+    return abc_malloc(sizeof(struct abc_stmt));
+}
+
 // END STMT
 
 // BEGIN DECL
@@ -158,7 +226,7 @@ struct abc_var_decl {
     struct abc_token name;
     bool has_init;
     // valid if has_init == true
-	struct abc_expr init;
+	struct abc_expr *init;
 };
 
 struct abc_stmt_decl {

@@ -1,3 +1,9 @@
+/**
+ * Error model is that only the 'root' allocation needs to be handled/freed by the caller, any allocations made
+* by the callee is freed by the callee on error. Only expressions, the branches of if statements, and the body of while
+* loops are heap allocated.
+*/
+
 #include "abc_parser.h"
 #include "abc_lexer.h"
 #include "data/abc_arr.h"
@@ -21,6 +27,7 @@ static void synchronize(struct abc_parser *parser) {
     struct abc_token token = abc_lexer_peek(parser->lexer);
     while(token.type != TOKEN_EOF && token.type != TOKEN_LBRACE) {
         abc_lexer_next_token(parser->lexer);
+        abc_lexer_token_free(&token);
         token = abc_lexer_peek(parser->lexer);
     }
 }
@@ -125,7 +132,13 @@ static bool parse_var_decl(struct abc_parser *parser, struct abc_decl *decl) {
     abc_lexer_next_token(parser->lexer);
 
     decl->val.var.has_init = true;
-    decl->val.var.init = {}; // TODO parse expr
+    decl->val.var.init = abc_expr();
+    if (!parse_expr(parser, decl->val.var.init, 0)) {
+        fprintf(stderr, "unable to parse var declaration initializer\n");
+        free(decl->val.var.init);
+        parser->has_error = true;
+        return false;
+    }
     return match_token(parser, TOKEN_SEMICOLON);
 }
 
@@ -185,7 +198,7 @@ static bool parse_block_stmt(struct abc_parser *parser, struct abc_block_stmt *b
 
 
 static bool parse_expr_stmt(struct abc_parser *parser, struct abc_expr_stmt *stmt) {
-    return parse_expr(parser, &stmt->expr, 0);
+    return parse_expr(parser, (stmt->expr = abc_expr()), 0);
 }
 
 static bool parse_if_stmt(struct abc_parser *parser, struct abc_if_stmt *stmt) {
@@ -197,24 +210,27 @@ static bool parse_if_stmt(struct abc_parser *parser, struct abc_if_stmt *stmt) {
         fprintf(stderr, "expected '(' after 'if'\n");
         return false;
     }
-    struct abc_expr expr;
-    if (!parse_expr(parser, &expr, 0)) {
+    struct abc_expr *expr = abc_expr();
+    if (!parse_expr(parser, expr, 0)) {
+        free(expr);
         fprintf(stderr, "failed to parse if condition\n");
         return false;
     }
     stmt->cond = expr;
     if (!match_token(parser, TOKEN_RPAREN)) {
+        free(expr);
         fprintf(stderr, "expected ')' after 'if' condition\n");
         return false;
     }
 
-    // TODO: need allocation here
-    struct abc_stmt body;
-    if (!parse_stmt(parser, &body)) {
+    struct abc_stmt *body = abc_stmt();
+    if (!parse_stmt(parser, body)) {
+        free(expr);
+        free(body);
         fprintf(stderr, "failed to parse if statement body\n");
         return false;
     }
-    stmt->then_stmt = stmt;
+    stmt->then_stmt = body;
 
     // check for else
     struct abc_token token = abc_lexer_peek(parser->lexer);
@@ -224,13 +240,20 @@ static bool parse_if_stmt(struct abc_parser *parser, struct abc_if_stmt *stmt) {
         return true;
     }
     stmt->has_else = true;
-    // TODO: parse else stmt
+    struct abc_stmt *else_stmt = abc_stmt();
+    if (!parse_stmt(parser, else_stmt)) {
+        free(else_stmt);
+        free(body);
+        free(expr);
+        fprintf(stderr, "failed to parse else statement body\n");
+        return false;
+    }
+    stmt->else_stmt = else_stmt;
 
     return true;
 }
 
 static bool parse_while_stmt(struct abc_parser *parser, struct abc_while_stmt *stmt) {
-
     return false;
 }
 
@@ -243,5 +266,5 @@ static bool parse_return_stmt(struct abc_parser *parser, struct abc_return_stmt 
 }
 
 static bool parse_expr(struct abc_parser *parser, struct abc_expr *expr, int precedence) {
-    return false;
+    return parser->has_error; // TODO TMP
 }
