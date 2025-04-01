@@ -26,7 +26,9 @@ static char *my_strdup(const uint8_t *src, int len) {
     return result;
 }
 
-void abc_lexer_token_free(struct abc_token *token) { free(token->lexeme); }
+void abc_lexer_token_free(struct abc_token *token) {
+    free(token->lexeme);
+}
 
 void abc_lexer_destroy(struct abc_lexer *lexer) { fclose(lexer->file); }
 
@@ -195,7 +197,7 @@ static void lex_int(struct abc_lexer *lexer, uint8_t start, struct abc_token *to
 err:
     lexer->has_error = true;
     token->type = TOKEN_ERROR;
-    token->lexeme = "invalid integer token";
+    token->lexeme = my_strdup("invalid integer token", sizeof("invalid integer token") - 1);
     token->line = lexer->line;
     fprintf(stderr, "Failed to lex int at line %d\n", lexer->line);
     errno = errnocpy;
