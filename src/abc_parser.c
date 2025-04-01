@@ -1,8 +1,8 @@
 /**
  * Error model is that only the 'root' allocation needs to be handled/freed by the caller, any allocations made
-* by the callee is freed by the callee on error. Only expressions, the branches of if statements, and the body of while
-* loops are heap allocated.
-*/
+ * by the callee is freed by the callee on error. Only expressions, the branches of if statements, and the body of while
+ * loops are heap allocated.
+ */
 
 #include "abc_parser.h"
 #include "abc_lexer.h"
@@ -25,7 +25,7 @@ static bool parse_expr(struct abc_parser *parser, struct abc_expr *expr, int pre
 
 static void synchronize(struct abc_parser *parser) {
     struct abc_token token = abc_lexer_peek(parser->lexer);
-    while(token.type != TOKEN_EOF && token.type != TOKEN_LBRACE) {
+    while (token.type != TOKEN_EOF && token.type != TOKEN_LBRACE) {
         abc_lexer_next_token(parser->lexer);
         abc_lexer_token_free(&token);
         token = abc_lexer_peek(parser->lexer);
@@ -46,12 +46,12 @@ void abc_parser_init(struct abc_parser *parser, struct abc_lexer *lexer) {
 
 struct abc_program abc_parser_parse(struct abc_parser *parser) {
     struct abc_program program;
-    abc_arr_init(&program.fun_decls, sizeof (struct abc_fun_decl));
+    abc_arr_init(&program.fun_decls, sizeof(struct abc_fun_decl));
 
     struct abc_token token;
-    while((token = abc_lexer_peek(parser->lexer)).type != TOKEN_EOF) {
-		struct abc_fun_decl fun_decl;
-        if(parse_fun_decl(parser, &fun_decl)) {
+    while ((token = abc_lexer_peek(parser->lexer)).type != TOKEN_EOF) {
+        struct abc_fun_decl fun_decl;
+        if (parse_fun_decl(parser, &fun_decl)) {
             abc_arr_push(&program.fun_decls, &fun_decl);
         } else {
             synchronize(parser);
@@ -62,7 +62,7 @@ struct abc_program abc_parser_parse(struct abc_parser *parser) {
 }
 
 static bool parse_fun_decl(struct abc_parser *parser, struct abc_fun_decl *fun_decl) {
-    abc_arr_init(&fun_decl->params, sizeof (struct abc_param));
+    abc_arr_init(&fun_decl->params, sizeof(struct abc_param));
 
     struct abc_token type_token = abc_lexer_next_token(parser->lexer);
     if (type_token.type != TOKEN_INT_TYPE && type_token.type != TOKEN_VOID_TYPE) {
@@ -254,15 +254,94 @@ static bool parse_if_stmt(struct abc_parser *parser, struct abc_if_stmt *stmt) {
 }
 
 static bool parse_while_stmt(struct abc_parser *parser, struct abc_while_stmt *stmt) {
-    return false;
+    // while(cond)
+    if (!match_token(parser, TOKEN_WHILE)) {
+        fprintf(stderr, "expected 'while' to start while statement\n");
+        return false;
+    }
+    if (!match_token(parser, TOKEN_LPAREN)) {
+        fprintf(stderr, "expected '(' after 'while'\n");
+        return false;
+    }
+    struct abc_expr *cond = abc_expr();
+    if (!parse_expr(parser, cond, 0)) {
+        free(cond);
+        fprintf(stderr, "failed to parse while condition\n");
+        return false;
+    }
+    if (!match_token(parser, TOKEN_RPAREN)) {
+        free(cond);
+        fprintf(stderr, "expected ')' after 'while' condition\n");
+        return false;
+    }
+    // body
+    struct abc_stmt *body = abc_stmt();
+    if (!parse_stmt(parser, body)) {
+        free(cond);
+        free(body);
+        fprintf(stderr, "failed to parse while statement body\n");
+        return false;
+    }
+
+    stmt->cond = cond;
+    stmt->body = body;
+    return true;
 }
 
 static bool parse_print_stmt(struct abc_parser *parser, struct abc_print_stmt *stmt) {
-    return false;
+    if (!match_token(parser, TOKEN_PRINT)) {
+        fprintf(stderr, "expected 'print' to start print statement\n");
+        return false;
+    }
+    if (!match_token(parser, TOKEN_LPAREN)) {
+        fprintf(stderr, "expected '(' after 'print'\n");
+        return false;
+    }
+    struct abc_expr *expr = abc_expr();
+    if (!parse_expr(parser, expr, 0)) {
+        free(expr);
+        fprintf(stderr, "failed to parse print statement expr\n");
+        return false;
+    }
+    if (!match_token(parser, TOKEN_RPAREN)) {
+        free(expr);
+        fprintf(stderr, "expected ')' after 'print'\n");
+        return false;
+    }
+    if (!match_token(parser, TOKEN_SEMICOLON)) {
+        free(expr);
+        fprintf(stderr, "expected ';' after 'print'\n");
+        return false;
+    }
+    stmt->expr = expr;
+    return true;
 }
 
 static bool parse_return_stmt(struct abc_parser *parser, struct abc_return_stmt *stmt) {
-    return false;
+    if (!match_token(parser, TOKEN_RETURN)) {
+        fprintf(stderr, "expected 'return' to start return statement\n");
+        return false;
+    }
+    const struct abc_token token = abc_lexer_peek(parser->lexer);
+    if (token.type == TOKEN_SEMICOLON) {
+        (void) match_token(parser, TOKEN_SEMICOLON);
+        stmt->has_expr = false;
+        stmt->expr = NULL;
+    }
+
+    struct abc_expr *expr = abc_expr();
+    if (!parse_expr(parser, expr, 0)) {
+        free(expr);
+        fprintf(stderr, "failed to parse return statement expr\n");
+        return false;
+    }
+    if (!match_token(parser, TOKEN_SEMICOLON)) {
+        free(expr);
+        fprintf(stderr, "expected ';' after 'return'\n");
+        return false;
+    }
+    stmt->expr = expr;
+    return true;
 }
 
 static bool parse_expr(struct abc_parser *parser, struct abc_expr *expr, int precedence) {

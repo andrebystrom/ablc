@@ -180,7 +180,7 @@ struct abc_if_stmt {
 
 struct abc_while_stmt {
     struct abc_expr *cond;
-    struct abc_stmt *then;
+    struct abc_stmt *body;
 };
 
 struct abc_block_stmt {
