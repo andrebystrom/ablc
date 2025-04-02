@@ -9,6 +9,7 @@
 #include "data/abc_arr.h"
 
 // TODO: make sure to call token_free where appropriate
+// TODO: move error handling to central function that sets error flag.
 
 static bool parse_fun_decl(struct abc_parser *parser, struct abc_fun_decl *fun_decl);
 static bool parse_decl(struct abc_parser *parser, struct abc_decl *decl);
@@ -21,7 +22,9 @@ static bool parse_while_stmt(struct abc_parser *parser, struct abc_while_stmt *s
 static bool parse_block_stmt(struct abc_parser *parser, struct abc_block_stmt *block);
 static bool parse_print_stmt(struct abc_parser *parser, struct abc_print_stmt *stmt);
 static bool parse_return_stmt(struct abc_parser *parser, struct abc_return_stmt *stmt);
-static bool parse_expr(struct abc_parser *parser, struct abc_expr *expr, int precedence);
+static struct abc_expr *parse_expr(struct abc_parser *parser, int precedence);
+static struct abc_expr *parse_expr_internal(struct abc_parser *parser, struct abc_expr *opt_left, int precedence);
+static struct abc_expr *parse_expr_lhs(struct abc_parser *parser, struct abc_token token, int precedence);
 
 static void synchronize(struct abc_parser *parser) {
     struct abc_token token = abc_lexer_peek(parser->lexer);
@@ -132,11 +135,10 @@ static bool parse_var_decl(struct abc_parser *parser, struct abc_decl *decl) {
     abc_lexer_next_token(parser->lexer);
 
     decl->val.var.has_init = true;
-    decl->val.var.init = abc_expr();
-    if (!parse_expr(parser, decl->val.var.init, 0)) {
-        fprintf(stderr, "unable to parse var declaration initializer\n");
-        free(decl->val.var.init);
+    decl->val.var.init = parse_expr(parser, 0);
+    if (decl->val.var.init == NULL) {
         parser->has_error = true;
+        fprintf(stderr, "unable to parse var declaration initializer\n");
         return false;
     }
     return match_token(parser, TOKEN_SEMICOLON);
@@ -196,9 +198,9 @@ static bool parse_block_stmt(struct abc_parser *parser, struct abc_block_stmt *b
     return false;
 }
 
-
 static bool parse_expr_stmt(struct abc_parser *parser, struct abc_expr_stmt *stmt) {
-    return parse_expr(parser, (stmt->expr = abc_expr()), 0);
+    stmt->expr = parse_expr(parser, 0);
+    return stmt->expr != NULL;
 }
 
 static bool parse_if_stmt(struct abc_parser *parser, struct abc_if_stmt *stmt) {
@@ -210,9 +212,8 @@ static bool parse_if_stmt(struct abc_parser *parser, struct abc_if_stmt *stmt) {
         fprintf(stderr, "expected '(' after 'if'\n");
         return false;
     }
-    struct abc_expr *expr = abc_expr();
-    if (!parse_expr(parser, expr, 0)) {
-        free(expr);
+    struct abc_expr *expr;
+    if ((expr = parse_expr(parser, 0)) == NULL) {
         fprintf(stderr, "failed to parse if condition\n");
         return false;
     }
@@ -233,7 +234,7 @@ static bool parse_if_stmt(struct abc_parser *parser, struct abc_if_stmt *stmt) {
     stmt->then_stmt = body;
 
     // check for else
-    struct abc_token token = abc_lexer_peek(parser->lexer);
+    const struct abc_token token = abc_lexer_peek(parser->lexer);
     if (token.type != TOKEN_ELSE) {
         stmt->has_else = false;
         stmt->then_stmt = NULL;
@@ -263,9 +264,8 @@ static bool parse_while_stmt(struct abc_parser *parser, struct abc_while_stmt *s
         fprintf(stderr, "expected '(' after 'while'\n");
         return false;
     }
-    struct abc_expr *cond = abc_expr();
-    if (!parse_expr(parser, cond, 0)) {
-        free(cond);
+    struct abc_expr *cond;
+    if ((cond = parse_expr(parser, 0)) == NULL) {
         fprintf(stderr, "failed to parse while condition\n");
         return false;
     }
@@ -297,9 +297,8 @@ static bool parse_print_stmt(struct abc_parser *parser, struct abc_print_stmt *s
         fprintf(stderr, "expected '(' after 'print'\n");
         return false;
     }
-    struct abc_expr *expr = abc_expr();
-    if (!parse_expr(parser, expr, 0)) {
-        free(expr);
+    struct abc_expr *expr;
+    if ((expr = parse_expr(parser, 0)) == NULL) {
         fprintf(stderr, "failed to parse print statement expr\n");
         return false;
     }
@@ -329,9 +328,8 @@ static bool parse_return_stmt(struct abc_parser *parser, struct abc_return_stmt 
         stmt->expr = NULL;
     }
 
-    struct abc_expr *expr = abc_expr();
-    if (!parse_expr(parser, expr, 0)) {
-        free(expr);
+    struct abc_expr *expr;
+    if ((expr = parse_expr(parser, 0)) == NULL) {
         fprintf(stderr, "failed to parse return statement expr\n");
         return false;
     }
@@ -344,6 +342,31 @@ static bool parse_return_stmt(struct abc_parser *parser, struct abc_return_stmt 
     return true;
 }
 
-static bool parse_expr(struct abc_parser *parser, struct abc_expr *expr, int precedence) {
-    return parser->has_error; // TODO TMP
+static struct abc_expr *parse_expr(struct abc_parser *parser, int precedence) {
+    struct abc_token token = abc_lexer_peek(parser->lexer);
+
+
+    return (void *) parser->has_error; // TODO TMP
+}
+
+static struct abc_expr *parse_expr_internal(struct abc_parser *parser, struct abc_expr *opt_left, int precedence) {
+    return NULL;
+}
+
+static struct abc_expr *parse_expr_lhs(struct abc_parser *parser, struct abc_token token, int precedence) {
+    switch (token.type) {
+        case TOKEN_INT:
+        case TOKEN_IDENTIFIER:
+            break;
+        case TOKEN_LPAREN:
+            break;
+        case TOKEN_BANG:
+        case TOKEN_MINUS:
+            break;
+        default:
+            fprintf(stderr, "unexpected token to start expr: '%s'\n", token.lexeme);
+            (void) match_token(parser, token.type);
+            return NULL;
+    }
+    return NULL;
 }
