@@ -5,6 +5,9 @@
  */
 
 #include "abc_parser.h"
+
+#include <assert.h>
+
 #include "abc_lexer.h"
 #include "data/abc_arr.h"
 
@@ -23,8 +26,7 @@ static bool parse_block_stmt(struct abc_parser *parser, struct abc_block_stmt *b
 static bool parse_print_stmt(struct abc_parser *parser, struct abc_print_stmt *stmt);
 static bool parse_return_stmt(struct abc_parser *parser, struct abc_return_stmt *stmt);
 static struct abc_expr *parse_expr(struct abc_parser *parser, int precedence);
-static struct abc_expr *parse_expr_internal(struct abc_parser *parser, struct abc_expr *opt_left, int precedence);
-static struct abc_expr *parse_expr_lhs(struct abc_parser *parser, struct abc_token token, int precedence);
+static struct abc_expr *parse_expr_lhs(struct abc_parser *parser);
 
 static void synchronize(struct abc_parser *parser) {
     struct abc_token token = abc_lexer_peek(parser->lexer);
@@ -342,18 +344,45 @@ static bool parse_return_stmt(struct abc_parser *parser, struct abc_return_stmt 
     return true;
 }
 
+// bigger number => higher precedence, 0 => not applicable.
+static struct binding_power {
+    int left;
+    int right;
+} binding_powers[TOKEN_EOF] {
+    [TOKEN_EQUALS] = {.left = 2, .right = 1},
+    [TOKEN_OR] = {.left = 3, .right = 4},
+    [TOKEN_AND] = {.left = 5, .right = 6},
+    [TOKEN_EQUALS_EQUALS] = {.left = 7, .right = 8},
+    [TOKEN_BANG_EQUALS] = {.left = 7, .right = 8},
+    // Same for all comparisons
+    [TOKEN_GREATER] = {.left = 9, .right = 10},
+    [TOKEN_GREATER_EQUALS] = {.left = 9, .right = 10},
+    [TOKEN_LESS] = {.left = 9, .right = 10},
+    [TOKEN_LESS_EQUALS] = {.left = 9, .right = 10},
+
+    [TOKEN_PLUS] = {.left = 11, .right = 12},
+    [TOKEN_MINUS] = {.left = 11, .right = 12},
+    [TOKEN_STAR] = {.left = 13, .right = 14},
+    [TOKEN_SLASH] = {.left = 13, .right = 14},
+};
+static int left_binding_powers[TOKEN_EOF] = {[TOKEN_BANG] = 15, [TOKEN_MINUS] = 15};
+
 static struct abc_expr *parse_expr(struct abc_parser *parser, int precedence) {
-    struct abc_token token = abc_lexer_peek(parser->lexer);
+    assert(precedence >= 0);
+    struct abc_expr *lhs;
+    if ((lhs = parse_expr_lhs(parser)) == NULL) {
+        return NULL;
+    }
 
+    // TODO LOOP
 
-    return (void *) parser->has_error; // TODO TMP
+    // TODO check prefix (call)
+    // TODO check infix
+
+    return (void *)parser->has_error; // TODO tmp
 }
 
-static struct abc_expr *parse_expr_internal(struct abc_parser *parser, struct abc_expr *opt_left, int precedence) {
-    return NULL;
-}
-
-static struct abc_expr *parse_expr_lhs(struct abc_parser *parser, struct abc_token token, int precedence) {
+static struct abc_expr *parse_expr_lhs(struct abc_parser *parser) {
     switch (token.type) {
         case TOKEN_INT:
         case TOKEN_IDENTIFIER:
