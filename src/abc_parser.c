@@ -348,24 +348,25 @@ static bool parse_return_stmt(struct abc_parser *parser, struct abc_return_stmt 
 static struct binding_power {
     int left;
     int right;
-} binding_powers[TOKEN_EOF] {
-    [TOKEN_EQUALS] = {.left = 2, .right = 1},
-    [TOKEN_OR] = {.left = 3, .right = 4},
-    [TOKEN_AND] = {.left = 5, .right = 6},
-    [TOKEN_EQUALS_EQUALS] = {.left = 7, .right = 8},
-    [TOKEN_BANG_EQUALS] = {.left = 7, .right = 8},
-    // Same for all comparisons
-    [TOKEN_GREATER] = {.left = 9, .right = 10},
-    [TOKEN_GREATER_EQUALS] = {.left = 9, .right = 10},
-    [TOKEN_LESS] = {.left = 9, .right = 10},
-    [TOKEN_LESS_EQUALS] = {.left = 9, .right = 10},
+} binding_powers[TOKEN_EOF]{
+        [TOKEN_EQUALS] = {.left = 2, .right = 1},
+        [TOKEN_OR] = {.left = 3, .right = 4},
+        [TOKEN_AND] = {.left = 5, .right = 6},
+        [TOKEN_EQUALS_EQUALS] = {.left = 7, .right = 8},
+        [TOKEN_BANG_EQUALS] = {.left = 7, .right = 8},
+        // Same for all comparisons
+        [TOKEN_GREATER] = {.left = 9, .right = 10},
+        [TOKEN_GREATER_EQUALS] = {.left = 9, .right = 10},
+        [TOKEN_LESS] = {.left = 9, .right = 10},
+        [TOKEN_LESS_EQUALS] = {.left = 9, .right = 10},
 
-    [TOKEN_PLUS] = {.left = 11, .right = 12},
-    [TOKEN_MINUS] = {.left = 11, .right = 12},
-    [TOKEN_STAR] = {.left = 13, .right = 14},
-    [TOKEN_SLASH] = {.left = 13, .right = 14},
+        [TOKEN_PLUS] = {.left = 11, .right = 12},
+        [TOKEN_MINUS] = {.left = 11, .right = 12},
+        [TOKEN_STAR] = {.left = 13, .right = 14},
+        [TOKEN_SLASH] = {.left = 13, .right = 14},
 };
 static int left_binding_powers[TOKEN_EOF] = {[TOKEN_BANG] = 15, [TOKEN_MINUS] = 15};
+static int right_binding_powers[TOKEN_EOF] = {[TOKEN_LPAREN] = 16};
 
 static struct abc_expr *parse_expr(struct abc_parser *parser, int precedence) {
     assert(precedence >= 0);
@@ -374,28 +375,76 @@ static struct abc_expr *parse_expr(struct abc_parser *parser, int precedence) {
         return NULL;
     }
 
-    // TODO LOOP
+    bool higher_precedence = true;
+    int left_bp;
+    int right_bp;
+    while (higher_precedence) {
+        // TODO tmp to silence IDE warnings
+        if (parser->has_error) {
+            higher_precedence = false;
+        }
+        struct abc_token token = abc_lexer_peek(parser->lexer);
+        // TODO check prefix (call)
+        if ((right_bp = right_binding_powers[token.type]) > 0) {
+        }
+        // TODO check infix
+    }
 
-    // TODO check prefix (call)
-    // TODO check infix
-
-    return (void *)parser->has_error; // TODO tmp
+    return (void *) parser->has_error; // TODO tmp
 }
 
 static struct abc_expr *parse_expr_lhs(struct abc_parser *parser) {
+    struct abc_token token = abc_lexer_peek(parser->lexer);
+    struct abc_expr *expr = abc_expr();
     switch (token.type) {
         case TOKEN_INT:
+            expr->tag = ABC_EXPR_LITERAL;
+            expr->val.lit_expr.lit.tag = ABC_LITERAL_INT;
+            expr->val.lit_expr.lit.val.integer = (long) token.data;
+            (void) match_token(parser, token.type);
+            return expr;
         case TOKEN_IDENTIFIER:
-            break;
+            expr->tag = ABC_EXPR_LITERAL;
+            expr->val.lit_expr.lit.tag = ABC_LITERAL_ID;
+            expr->val.lit_expr.lit.val.identifier = token;
+            (void) abc_lexer_next_token(parser->lexer); // we do not want to free the token.
+            return expr;
         case TOKEN_LPAREN:
-            break;
+            (void) match_token(parser, token.type);
+            expr->tag = ABC_EXPR_GROUPING;
+            expr->val.grouping_expr.expr = parse_expr(parser, 0);
+            if (expr->val.grouping_expr.expr == NULL) {
+                free(expr);
+                fprintf(stderr, "failed to parse grouping expr\n");
+                return NULL;
+            }
+            if (!match_token(parser, TOKEN_RPAREN)) {
+                free(expr->val.grouping_expr.expr);
+                free(expr);
+                fprintf(stderr, "expected ')' after grouping expr\n");
+                return NULL;
+            }
+            return expr;
         case TOKEN_BANG:
+            // fall through
         case TOKEN_MINUS:
-            break;
+            expr->tag = ABC_EXPR_UNARY;
+            expr->val.unary_expr.op = token;
+            expr->val.unary_expr.expr = parse_expr(parser, left_binding_powers[token.type]);
+            if (expr->val.unary_expr.expr == NULL) {
+                (void) match_token(parser, token.type);
+                free(expr);
+                fprintf(stderr, "failed to parse unary expr\n");
+                return NULL;
+            }
+            (void) abc_lexer_next_token(parser->lexer);
+            return expr;
         default:
+            free(expr);
             fprintf(stderr, "unexpected token to start expr: '%s'\n", token.lexeme);
             (void) match_token(parser, token.type);
             return NULL;
     }
+    assert(0); // unreachable
     return NULL;
 }

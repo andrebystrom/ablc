@@ -44,7 +44,7 @@ enum abc_token_type {
     TOKEN_INT,
     TOKEN_IDENTIFIER,
     TOKEN_ERROR,
-    TOKEN_EOF
+    TOKEN_EOF // this needs to be last, relied upon for lookup tables.
 };
 
 struct abc_token {

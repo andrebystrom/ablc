@@ -45,7 +45,7 @@ struct abc_lit {
 	enum abc_lit_tag tag;
     union {
         struct abc_token identifier;
-        int integer;
+        long integer;
     } val;
 };
 

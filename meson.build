@@ -2,7 +2,7 @@ project('ablc', 'c',
         version : '1.0.0',
         default_options : ['warning_level=3', 'c_std=gnu11'])
 
-add_global_arguments('-Db_sanitize=address', '-Db_sanitize=leak', '-Db_sanitize=undefined', language : 'c')
+add_global_arguments('-Db_sanitize=address,leak,undefined', language : 'c')
 
 sources = [
         'src/main.c',

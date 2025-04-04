@@ -197,7 +197,7 @@ static void lex_int(struct abc_lexer *lexer, uint8_t start, struct abc_token *to
 err:
     lexer->has_error = true;
     token->type = TOKEN_ERROR;
-    token->lexeme = my_strdup("invalid integer token", sizeof("invalid integer token") - 1);
+    token->lexeme = my_strdup((uint8_t *)"invalid integer token", sizeof("invalid integer token") - 1);
     token->line = lexer->line;
     fprintf(stderr, "Failed to lex int at line %d\n", lexer->line);
     errno = errnocpy;
