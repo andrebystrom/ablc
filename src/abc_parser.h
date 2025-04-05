@@ -15,7 +15,7 @@ struct abc_expr;
 
 // misc
 
-static void *abc_malloc(const size_t size) {
+static inline void *abc_malloc(const size_t size) {
     void *p = malloc(size);
     if (p == NULL) {
         fprintf(stderr, "Out of memory\n");
@@ -103,11 +103,13 @@ struct abc_expr {
     } val;
 };
 
-inline struct abc_expr *abc_expr(void) {
+static inline struct abc_expr *abc_expr(void) {
     return abc_malloc(sizeof(struct abc_expr));
 }
 
-inline struct abc_expr *abc_bin_expr(struct abc_token op, struct abc_expr *left, struct abc_expr *right) {
+void free_expr(struct abc_expr *expr);
+
+static inline struct abc_expr *abc_bin_expr(struct abc_token op, struct abc_expr *left, struct abc_expr *right) {
     struct abc_expr *ret = abc_malloc(sizeof(struct abc_expr));
     ret->tag = ABC_EXPR_BINARY;
     ret->val.bin_expr.op = op;
@@ -116,7 +118,7 @@ inline struct abc_expr *abc_bin_expr(struct abc_token op, struct abc_expr *left,
     return ret;
 }
 
-inline struct abc_expr *abc_unary_expr(struct abc_token op, struct abc_expr *expr) {
+static inline struct abc_expr *abc_unary_expr(struct abc_token op, struct abc_expr *expr) {
     struct abc_expr *ret = abc_malloc(sizeof(struct abc_expr));
     ret->tag = ABC_EXPR_UNARY;
     ret->val.unary_expr.op = op;
@@ -124,7 +126,7 @@ inline struct abc_expr *abc_unary_expr(struct abc_token op, struct abc_expr *exp
     return ret;
 }
 
-inline struct abc_expr *abc_call_expr(struct abc_lit callee, struct abc_arr args) {
+static inline struct abc_expr *abc_call_expr(struct abc_lit callee, struct abc_arr args) {
     struct abc_expr *ret = abc_malloc(sizeof(struct abc_expr));
     ret->tag = ABC_EXPR_CALL;
     ret->val.call_expr.callee = callee;
@@ -132,21 +134,21 @@ inline struct abc_expr *abc_call_expr(struct abc_lit callee, struct abc_arr args
     return ret;
 }
 
-inline struct abc_expr *abc_grouping_expr(struct abc_expr *expr) {
+static inline struct abc_expr *abc_grouping_expr(struct abc_expr *expr) {
     struct abc_expr *ret = abc_malloc(sizeof(struct abc_expr));
     ret->tag = ABC_EXPR_GROUPING;
     ret->val.grouping_expr.expr = expr;
     return ret;
 }
 
-inline struct abc_expr *abc_lit_expr(struct abc_lit lit) {
+static inline struct abc_expr *abc_lit_expr(struct abc_lit lit) {
     struct abc_expr *ret = abc_malloc(sizeof(struct abc_expr));
     ret->tag = ABC_EXPR_LITERAL;
     ret->val.lit_expr.lit = lit;
     return ret;
 }
 
-inline struct abc_expr *abc_assign_expr(struct abc_lit lit, struct abc_expr *expr) {
+static inline struct abc_expr *abc_assign_expr(struct abc_lit lit, struct abc_expr *expr) {
     struct abc_expr *ret = abc_malloc(sizeof(struct abc_expr));
     ret->tag = ABC_EXPR_ASSIGN;
     ret->val.assign_expr.lit = lit;
@@ -208,7 +210,7 @@ struct abc_stmt {
     } val;
 };
 
-inline struct abc_stmt *abc_stmt(void) {
+static inline struct abc_stmt *abc_stmt(void) {
     return abc_malloc(sizeof(struct abc_stmt));
 }
 

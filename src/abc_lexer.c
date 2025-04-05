@@ -59,7 +59,10 @@ struct abc_token abc_lexer_next_token(struct abc_lexer *lexer) {
         result.line = lexer->line;
         return result;
     }
-    lexer->has_peek = false;
+    if (lexer->has_peek) {
+        lexer->has_peek = false;
+        return lexer->peeked;
+    }
 
     while ((tmpch = fgetc(lexer->file)) != EOF) {
         ch = (uint8_t) tmpch;
@@ -142,8 +145,9 @@ struct abc_token abc_lexer_peek(struct abc_lexer *lexer) {
     if (lexer->has_peek) {
         return lexer->peeked;
     }
+    struct abc_token res = lexer->peeked = abc_lexer_next_token(lexer);
     lexer->has_peek = true;
-    return lexer->peeked = abc_lexer_next_token(lexer);
+    return res;
 }
 
 static void max_munch(const struct abc_lexer *lexer, const enum abc_token_type type, const char start,

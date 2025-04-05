@@ -3,8 +3,10 @@
 #include <stdlib.h>
 
 #include "abc_lexer.h"
+#include "abc_parser.h"
 
 void doLex(char *file);
+void doParse(char *file);
 
 int main(int argc, char **argv) {
     if (argc < 2) {
@@ -15,6 +17,9 @@ int main(int argc, char **argv) {
     }
     else if (strcmp(argv[1], "lex") == 0) {
         doLex(argv[2]);
+    }
+    else if (strcmp(argv[1], "parse") == 0) {
+        doParse(argv[2]);
     }
     return 0;
 }
@@ -37,4 +42,19 @@ void doLex(char *file) {
     }
     printf("lexer err: %s\n", lexer.has_error ? "yes" : "no");
     abc_lexer_destroy(&lexer);
+}
+
+void doParse(char *file) {
+    struct abc_lexer lexer;
+    if (!abc_lexer_init(&lexer, file)) {
+        fprintf(stderr, "failed to init lexer\n");
+        exit(EXIT_FAILURE);
+    }
+    struct abc_parser parser;
+    abc_parser_init(&parser, &lexer);
+    struct abc_program program = abc_parser_parse(&parser);
+    if (parser.has_error) {
+        fprintf(stderr, "failed to parse program\n");
+        exit(EXIT_FAILURE);
+    }
 }

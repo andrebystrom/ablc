@@ -28,6 +28,7 @@ static bool parse_return_stmt(struct abc_parser *parser, struct abc_return_stmt 
 static struct abc_expr *parse_expr(struct abc_parser *parser, int precedence);
 static struct abc_expr *parse_expr_lhs(struct abc_parser *parser);
 static struct abc_expr *parse_expr_postfix(struct abc_parser *parser, struct abc_expr *lhs);
+struct abc_expr *parse_infix_expr(struct abc_parser *parser, struct abc_expr *lhs, int precedence);
 
 static void synchronize(struct abc_parser *parser) {
     struct abc_token token = abc_lexer_peek(parser->lexer);
@@ -66,6 +67,8 @@ struct abc_program abc_parser_parse(struct abc_parser *parser) {
 
     return program;
 }
+
+/* FUNCTIONS */
 
 static bool parse_fun_decl(struct abc_parser *parser, struct abc_fun_decl *fun_decl) {
     abc_arr_init(&fun_decl->params, sizeof(struct abc_param));
@@ -110,6 +113,8 @@ static bool parse_fun_decl(struct abc_parser *parser, struct abc_fun_decl *fun_d
     return parse_block_stmt(parser, &fun_decl->body);
 }
 
+/* DECLARATIONS */
+
 static bool parse_decl(struct abc_parser *parser, struct abc_decl *decl) {
     struct abc_token token = abc_lexer_peek(parser->lexer);
     if (token.type == TOKEN_VOID_TYPE || token.type == TOKEN_INT_TYPE) {
@@ -134,7 +139,7 @@ static bool parse_var_decl(struct abc_parser *parser, struct abc_decl *decl) {
 
     if (abc_lexer_peek(parser->lexer).type != TOKEN_EQUALS) {
         decl->val.var.has_init = false;
-        return true;
+        return match_token(parser, TOKEN_SEMICOLON);
     }
     abc_lexer_next_token(parser->lexer);
 
@@ -153,6 +158,7 @@ static bool parse_stmt_decl(struct abc_parser *parser, struct abc_decl *decl) {
     return parse_stmt(parser, &decl->val.stmt.stmt);
 }
 
+/* STATEMENTS */
 
 static bool parse_stmt(struct abc_parser *parser, struct abc_stmt *stmt) {
     switch (abc_lexer_peek(parser->lexer).type) {
@@ -346,11 +352,13 @@ static bool parse_return_stmt(struct abc_parser *parser, struct abc_return_stmt 
     return true;
 }
 
+/* EXPRESSIONS */
+
 // bigger number => higher precedence, 0 => not applicable.
 static struct binding_power {
     int left;
     int right;
-} binding_powers[TOKEN_EOF]{
+} binding_powers[TOKEN_EOF] = {
         [TOKEN_EQUALS] = {.left = 2, .right = 1},
         [TOKEN_OR] = {.left = 3, .right = 4},
         [TOKEN_AND] = {.left = 5, .right = 6},
@@ -377,7 +385,6 @@ static struct abc_expr *parse_expr(struct abc_parser *parser, int precedence) {
         return NULL;
     }
 
-    int left_bp;
     int right_bp;
     struct binding_power binding_power;
     while (1) {
@@ -388,14 +395,22 @@ static struct abc_expr *parse_expr(struct abc_parser *parser, int precedence) {
             }
             struct abc_expr *tmp = parse_expr_postfix(parser, lhs);
             if (tmp == NULL) {
-                // TODO handle
+                free_expr(lhs);
                 return NULL;
             }
             lhs = tmp;
             continue;
         }
-
-        // TODO check infix
+        if ((binding_power = binding_powers[token.type]).left <= 0 || binding_power.left < precedence) {
+            break;
+        }
+        struct abc_expr *tmp = parse_infix_expr(parser, lhs, binding_power.right);
+        if (tmp == NULL) {
+            free_expr(lhs);
+            fprintf(stderr, "failed to parse infix expr\n");
+            return NULL;
+        }
+        lhs = tmp;
     }
 
     return lhs;
@@ -448,8 +463,8 @@ static struct abc_expr *parse_expr_lhs(struct abc_parser *parser) {
             (void) abc_lexer_next_token(parser->lexer);
             return expr;
         default:
-            free(expr);
             fprintf(stderr, "unexpected token to start expr: '%s'\n", token.lexeme);
+            free(expr);
             (void) match_token(parser, token.type);
             return NULL;
     }
@@ -487,19 +502,109 @@ static struct abc_expr *parse_expr_postfix(struct abc_parser *parser, struct abc
     }
 
     if (!has_err) {
-        (void)match_token(parser, TOKEN_RPAREN);
+        (void) match_token(parser, TOKEN_RPAREN);
         struct abc_expr *res = abc_expr();
         res->tag = ABC_EXPR_CALL;
         res->val.call_expr.args = args;
         res->val.call_expr.callee = lhs->val.lit_expr.lit;
-        free(lhs); // TODO need recursive free expr method.
+        free_expr(lhs);
         return res;
     }
     // cleanup
-    for (int i = 0; i < args.len; i++) {
+    for (size_t i = 0; i < args.len; i++) {
         struct abc_expr *arg = ((struct abc_expr **) args.data)[i];
-        free(arg); // TODO need recursive free expr method.
+        free_expr(arg);
     }
     abc_arr_destroy(&args);
     return NULL;
+}
+
+// lhs might be freed on success, but never on error.
+struct abc_expr *parse_infix_expr(struct abc_parser *parser, struct abc_expr *lhs, int precedence) {
+    struct abc_token op = abc_lexer_next_token(parser->lexer);
+    if (op.type == TOKEN_EQUALS) {
+        // assign expr
+        abc_lexer_token_free(&op);
+        if (lhs->tag != ABC_LITERAL_ID || lhs->val.lit_expr.lit.tag != ABC_LITERAL_ID) {
+            fprintf(stderr, "expected identifier as lhs of assignment\n");
+            return NULL;
+        }
+        struct abc_expr *rhs = parse_expr(parser, precedence);
+        if (rhs == NULL) {
+            fprintf(stderr, "failed to parse assignment expression\n");
+            return NULL;
+        }
+        struct abc_expr *res = abc_expr();
+        res->tag = ABC_EXPR_ASSIGN;
+        res->val.assign_expr.lit.tag = ABC_LITERAL_ID;
+        res->val.assign_expr.lit.val.identifier = lhs->val.lit_expr.lit.val.identifier;
+        free(lhs); // we do not need this anymore
+        res->val.assign_expr.expr = rhs;
+        return res;
+    }
+    if (op.type == TOKEN_PLUS || op.type == TOKEN_MINUS || op.type == TOKEN_STAR || op.type == TOKEN_SLASH ||
+        op.type == TOKEN_AND || op.type == TOKEN_OR || op.type == TOKEN_GREATER || op.type == TOKEN_GREATER_EQUALS ||
+        op.type == TOKEN_LESS || op.type == TOKEN_LESS_EQUALS || op.type == TOKEN_EQUALS_EQUALS ||
+        op.type == TOKEN_BANG_EQUALS) {
+        // binary expr
+        struct abc_expr *rhs = parse_expr(parser, precedence);
+        if (!rhs) {
+            fprintf(stderr, "failed to parse binary expr\n");
+            return NULL;
+        }
+        struct abc_expr *res = abc_expr();
+        res->tag = ABC_EXPR_BINARY;
+        res->val.bin_expr.op = op;
+        res->val.bin_expr.left = lhs;
+        res->val.bin_expr.right = rhs;
+        return res;
+    }
+    // invalid op
+    fprintf(stderr, "unexpected binary expression operation token '%s'\n", op.lexeme);
+    abc_lexer_token_free(&op);
+    return NULL;
+}
+
+/* MISC */
+
+void free_expr(struct abc_expr *expr) {
+    switch (expr->tag) {
+        case ABC_EXPR_LITERAL:
+            if (expr->val.lit_expr.lit.tag != ABC_LITERAL_ID) {
+                abc_lexer_token_free(&expr->val.lit_expr.lit.val.identifier);
+            }
+            free(expr);
+            break;
+        case ABC_EXPR_GROUPING:
+            free_expr(expr->val.grouping_expr.expr);
+            free(expr);
+            break;
+        case ABC_EXPR_UNARY:
+            abc_lexer_token_free(&expr->val.unary_expr.op);
+            free_expr(expr->val.unary_expr.expr);
+            free(expr);
+            break;
+        case ABC_EXPR_CALL:
+            abc_lexer_token_free(&expr->val.call_expr.callee.val.identifier); // guaranteed to be identifier
+            for (size_t i = 0; i < expr->val.call_expr.args.len; i++) {
+                struct abc_expr *arg = ((struct abc_expr **) expr->val.call_expr.args.data)[i];
+                free(arg);
+            }
+            abc_arr_destroy(&expr->val.call_expr.args);
+            free(expr);
+            break;
+        case ABC_EXPR_ASSIGN:
+            abc_lexer_token_free(&expr->val.assign_expr.lit.val.identifier);
+            free(expr->val.assign_expr.expr);
+            free(expr);
+            break;
+        case ABC_EXPR_BINARY:
+            free(expr->val.bin_expr.left);
+            free(expr->val.bin_expr.right);
+            abc_lexer_token_free(&expr->val.bin_expr.op);
+            free(expr);
+            break;
+        default:
+            assert(0); // unreachable
+    }
 }
