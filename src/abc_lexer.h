@@ -31,6 +31,7 @@ enum abc_token_type {
     TOKEN_RPAREN,
     TOKEN_LBRACE,
     TOKEN_RBRACE,
+    TOKEN_COMMA,
     TOKEN_SEMICOLON,
     TOKEN_AND,
     TOKEN_OR,

@@ -27,6 +27,7 @@ static bool parse_print_stmt(struct abc_parser *parser, struct abc_print_stmt *s
 static bool parse_return_stmt(struct abc_parser *parser, struct abc_return_stmt *stmt);
 static struct abc_expr *parse_expr(struct abc_parser *parser, int precedence);
 static struct abc_expr *parse_expr_lhs(struct abc_parser *parser);
+static struct abc_expr *parse_expr_postfix(struct abc_parser *parser, struct abc_expr *lhs);
 
 static void synchronize(struct abc_parser *parser) {
     struct abc_token token = abc_lexer_peek(parser->lexer);
@@ -102,6 +103,7 @@ static bool parse_fun_decl(struct abc_parser *parser, struct abc_fun_decl *fun_d
             parser->has_error = true;
             return false;
         }
+        // TODO handle comma
         tmp_token = abc_lexer_next_token(parser->lexer);
     }
 
@@ -375,22 +377,28 @@ static struct abc_expr *parse_expr(struct abc_parser *parser, int precedence) {
         return NULL;
     }
 
-    bool higher_precedence = true;
     int left_bp;
     int right_bp;
-    while (higher_precedence) {
-        // TODO tmp to silence IDE warnings
-        if (parser->has_error) {
-            higher_precedence = false;
-        }
+    struct binding_power binding_power;
+    while (1) {
         struct abc_token token = abc_lexer_peek(parser->lexer);
-        // TODO check prefix (call)
         if ((right_bp = right_binding_powers[token.type]) > 0) {
+            if (right_bp > precedence) {
+                break;
+            }
+            struct abc_expr *tmp = parse_expr_postfix(parser, lhs);
+            if (tmp == NULL) {
+                // TODO handle
+                return NULL;
+            }
+            lhs = tmp;
+            continue;
         }
+
         // TODO check infix
     }
 
-    return (void *) parser->has_error; // TODO tmp
+    return lhs;
 }
 
 static struct abc_expr *parse_expr_lhs(struct abc_parser *parser) {
@@ -446,5 +454,52 @@ static struct abc_expr *parse_expr_lhs(struct abc_parser *parser) {
             return NULL;
     }
     assert(0); // unreachable
+    return NULL;
+}
+
+// lhs is freed on success, on failure it is not.
+static struct abc_expr *parse_expr_postfix(struct abc_parser *parser, struct abc_expr *lhs) {
+    // only function calls currently
+    if (lhs->tag != ABC_EXPR_LITERAL || lhs->val.lit_expr.lit.tag != ABC_LITERAL_ID) {
+        fprintf(stderr, "expected identifier as function name\n");
+        return NULL;
+    }
+    if (!match_token(parser, TOKEN_LPAREN)) {
+        fprintf(stderr, "expected '(' after function name in call\n");
+        return NULL;
+    }
+    struct abc_token token = abc_lexer_peek(parser->lexer);
+    struct abc_arr args;
+    abc_arr_init(&args, sizeof(struct abc_expr *));
+    bool has_err = false;
+    while (token.type != TOKEN_RPAREN) {
+        struct abc_expr *arg = parse_expr(parser, 0);
+        if (arg == NULL) {
+            has_err = true;
+            break;
+        }
+        abc_arr_push(&args, arg);
+        token = abc_lexer_peek(parser->lexer);
+        if (token.type == TOKEN_COMMA) {
+            (void) match_token(parser, token.type);
+            token = abc_lexer_peek(parser->lexer);
+        }
+    }
+
+    if (!has_err) {
+        (void)match_token(parser, TOKEN_RPAREN);
+        struct abc_expr *res = abc_expr();
+        res->tag = ABC_EXPR_CALL;
+        res->val.call_expr.args = args;
+        res->val.call_expr.callee = lhs->val.lit_expr.lit;
+        free(lhs); // TODO need recursive free expr method.
+        return res;
+    }
+    // cleanup
+    for (int i = 0; i < args.len; i++) {
+        struct abc_expr *arg = ((struct abc_expr **) args.data)[i];
+        free(arg); // TODO need recursive free expr method.
+    }
+    abc_arr_destroy(&args);
     return NULL;
 }

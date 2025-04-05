@@ -75,7 +75,7 @@ struct abc_token abc_lexer_next_token(struct abc_lexer *lexer) {
         }
         // Basic tokens
         if (ch == '+' || ch == '-' || ch == '*' || ch == '/' || ch == '(' || ch == ')' || ch == '{' || ch == '}' ||
-            ch == ';') {
+            ch == ',' || ch == ';') {
             result.line = lexer->line;
             result.lexeme = my_strdup(&ch, 1);
             if (ch == '+')
@@ -94,6 +94,8 @@ struct abc_token abc_lexer_next_token(struct abc_lexer *lexer) {
                 result.type = TOKEN_LBRACE;
             else if (ch == '}')
                 result.type = TOKEN_RBRACE;
+            else if (ch == ',')
+                result.type = TOKEN_COMMA;
             else
                 result.type = TOKEN_SEMICOLON;
             return result;
