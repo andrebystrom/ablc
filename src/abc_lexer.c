@@ -234,23 +234,23 @@ static void lex_keyword_or_identifier(struct abc_lexer *lexer, uint8_t start, st
 
     token->lexeme = my_strdup(lexer->buf, lexer->buf_pos);
     char *buf = (char *) lexer->buf;
-    if (strncmp(buf, "if", lexer->buf_pos) == 0) {
+    if (lexer->buf_pos == 2 && strncmp(buf, "if", lexer->buf_pos) == 0) {
         token->type = TOKEN_IF;
-    } else if (strncmp(buf, "else", lexer->buf_pos) == 0) {
+    } else if (lexer->buf_pos == 4 && strncmp(buf, "else", lexer->buf_pos) == 0) {
         token->type = TOKEN_ELSE;
-    } else if (strncmp(buf, "while", lexer->buf_pos) == 0) {
+    } else if (lexer->buf_pos == 5 && strncmp(buf, "while", lexer->buf_pos) == 0) {
         token->type = TOKEN_WHILE;
-    } else if (strncmp(buf, "print", lexer->buf_pos) == 0) {
+    } else if (lexer->buf_pos == 5 && strncmp(buf, "print", lexer->buf_pos) == 0) {
         token->type = TOKEN_PRINT;
-    } else if (strncmp(buf, "int", lexer->buf_pos) == 0) {
+    } else if (lexer->buf_pos == 3 && strncmp(buf, "int", lexer->buf_pos) == 0) {
         token->type = TOKEN_INT_TYPE;
-    } else if (strncmp(buf, "void", lexer->buf_pos) == 0) {
+    } else if (lexer->buf_pos == 4 && strncmp(buf, "void", lexer->buf_pos) == 0) {
         token->type = TOKEN_VOID_TYPE;
-    } else if (strncmp(buf, "return", lexer->buf_pos) == 0) {
+    } else if (lexer->buf_pos == 6 && strncmp(buf, "return", lexer->buf_pos) == 0) {
         token->type = TOKEN_RETURN;
-    } else if (strncmp(buf, "and", lexer->buf_pos) == 0) {
+    } else if (lexer->buf_pos == 3 && strncmp(buf, "and", lexer->buf_pos) == 0) {
         token->type = TOKEN_AND;
-    } else if (strncmp(buf, "or", lexer->buf_pos) == 0) {
+    } else if (lexer->buf_pos == 2 && strncmp(buf, "or", lexer->buf_pos) == 0) {
         token->type = TOKEN_OR;
     } else {
         token->type = TOKEN_IDENTIFIER;

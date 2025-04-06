@@ -57,4 +57,5 @@ void doParse(char *file) {
         fprintf(stderr, "failed to parse program\n");
         exit(EXIT_FAILURE);
     }
+    printf("parsed %lu fun decls\n", program.fun_decls.len);
 }

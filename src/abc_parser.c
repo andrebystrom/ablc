@@ -7,6 +7,7 @@
 #include "abc_parser.h"
 
 #include <assert.h>
+#include <stdarg.h>
 
 #include "abc_lexer.h"
 #include "data/abc_arr.h"
@@ -40,10 +41,21 @@ static void synchronize(struct abc_parser *parser) {
 }
 
 static bool match_token(struct abc_parser *parser, enum abc_token_type type) {
+    // TODO: better to report_error here?
     struct abc_token token = abc_lexer_next_token(parser->lexer);
     const enum abc_token_type tmp = token.type;
     abc_lexer_token_free(&token);
     return tmp == type;
+}
+
+static void report_error(struct abc_parser *parser, int line, char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    fprintf(stderr, "Error at line %d:", line);
+    vfprintf(stderr, fmt, ap);
+    fprintf(stderr, "\n");
+    va_end(ap);
+    parser->has_error = true;
 }
 
 void abc_parser_init(struct abc_parser *parser, struct abc_lexer *lexer) {
@@ -72,45 +84,72 @@ struct abc_program abc_parser_parse(struct abc_parser *parser) {
 
 static bool parse_fun_decl(struct abc_parser *parser, struct abc_fun_decl *fun_decl) {
     abc_arr_init(&fun_decl->params, sizeof(struct abc_param));
-
     struct abc_token type_token = abc_lexer_next_token(parser->lexer);
     if (type_token.type != TOKEN_INT_TYPE && type_token.type != TOKEN_VOID_TYPE) {
-        fprintf(stderr, "expected int or void, got %s\n", type_token.lexeme);
-        parser->has_error = true;
+        report_error(parser, type_token.line, "Expected int or void, got %s", type_token.lexeme);
+        abc_lexer_token_free(&type_token);
         return false;
     }
+    fun_decl->type = type_token.type == TOKEN_INT_TYPE ? ABC_TYPE_INT : ABC_TYPE_VOID;
+    abc_lexer_token_free(&type_token);
 
     struct abc_token id_token = abc_lexer_next_token(parser->lexer);
     if (id_token.type != TOKEN_IDENTIFIER) {
-        fprintf(stderr, "expected identifier, got %s\n", id_token.lexeme);
-        parser->has_error = true;
+        report_error(parser, id_token.line, "Expected an identifier after identifier, got %s", id_token.lexeme);
+        abc_lexer_token_free(&id_token);
         return false;
     }
+    fun_decl->name = id_token;
 
     if (!match_token(parser, TOKEN_LPAREN)) {
-        fprintf(stderr, "expected '(' after identifier");
-        parser->has_error = true;
+        report_error(parser, id_token.line, "expected '(' after identifier");
+        abc_lexer_token_free(&id_token);
         return false;
     }
 
     struct abc_token tmp_token = abc_lexer_next_token(parser->lexer);
+    bool has_err = false;
     while (tmp_token.type != TOKEN_RPAREN) {
+        struct abc_param param;
         if (tmp_token.type != TOKEN_INT_TYPE) {
-            fprintf(stderr, "expected int type in parameter list, got %s\n", tmp_token.lexeme);
-            parser->has_error = true;
-            return false;
+            report_error(parser, tmp_token.line, "Expected int or void, got %s", tmp_token.lexeme);
+            abc_lexer_token_free(&tmp_token);
+            has_err = true;
+            break;
         }
+        param.type = tmp_token.type == TOKEN_INT_TYPE ? ABC_TYPE_INT : ABC_TYPE_VOID;
+        abc_lexer_token_free(&tmp_token);
         tmp_token = abc_lexer_next_token(parser->lexer);
         if (tmp_token.type != TOKEN_IDENTIFIER) {
-            fprintf(stderr, "expected identifier in parameter after type, got %s\n", tmp_token.lexeme);
-            parser->has_error = true;
-            return false;
+            report_error(parser, tmp_token.line, "Expected an identifier, got %s", tmp_token.lexeme);
+            abc_lexer_token_free(&tmp_token);
+            has_err = true;
+            break;
         }
-        // TODO handle comma
+        param.token = tmp_token;
         tmp_token = abc_lexer_next_token(parser->lexer);
+        abc_arr_push(&fun_decl->params, &param);
+        if (tmp_token.type == TOKEN_COMMA) {
+            abc_lexer_token_free(&tmp_token);
+            tmp_token = abc_lexer_next_token(parser->lexer);
+        }
+    }
+    if (has_err) {
+        goto cleanup;
     }
 
-    return parse_block_stmt(parser, &fun_decl->body);
+    abc_lexer_token_free(&tmp_token);
+    if (!parse_block_stmt(parser, &fun_decl->body)) {
+        goto cleanup;
+    }
+    return true;
+cleanup:
+    abc_lexer_token_free(&id_token);
+    for (size_t i = 0; i < fun_decl->params.len; i++) {
+        struct abc_param *param = ((struct abc_param **) fun_decl->params.data)[i];
+        abc_lexer_token_free(&param->token);
+    }
+    return false;
 }
 
 /* DECLARATIONS */
@@ -127,30 +166,47 @@ static bool parse_var_decl(struct abc_parser *parser, struct abc_decl *decl) {
     decl->tag = ABC_DECL_VAR;
 
     struct abc_token type_token = abc_lexer_next_token(parser->lexer);
+    if (type_token.type != TOKEN_INT_TYPE && type_token.type != TOKEN_VOID_TYPE) {
+        report_error(parser, type_token.line, "Expected int or void, got %s", type_token.lexeme);
+        abc_lexer_token_free(&type_token);
+        return false;
+    }
+    decl->val.var.type = type_token.type == TOKEN_INT_TYPE ? ABC_TYPE_INT : ABC_TYPE_VOID;
+    abc_lexer_token_free(&type_token);
+
     struct abc_token id = abc_lexer_peek(parser->lexer);
     if (id.type != TOKEN_IDENTIFIER) {
-        fprintf(stderr, "expected identifier, got %s\n", id.lexeme);
+        report_error(parser, id.line, "Expected an identifier, got %s", id.lexeme);
         return false;
     }
     abc_lexer_next_token(parser->lexer);
-
-    decl->val.var.type = type_token.type == TOKEN_INT_TYPE ? ABC_TYPE_INT : ABC_TYPE_VOID;
     decl->val.var.name = id;
 
     if (abc_lexer_peek(parser->lexer).type != TOKEN_EQUALS) {
         decl->val.var.has_init = false;
-        return match_token(parser, TOKEN_SEMICOLON);
+        if (!match_token(parser, TOKEN_SEMICOLON)) {
+            report_error(parser, id.line, "expect ';' to end var decl");
+            abc_lexer_token_free(&id);
+            return false;
+        }
+        return true;
     }
-    abc_lexer_next_token(parser->lexer);
+    match_token(parser, TOKEN_EQUALS);
 
     decl->val.var.has_init = true;
     decl->val.var.init = parse_expr(parser, 0);
     if (decl->val.var.init == NULL) {
-        parser->has_error = true;
-        fprintf(stderr, "unable to parse var declaration initializer\n");
+        report_error(parser, id.line, "unable to parse var decl initializer");
+        abc_lexer_token_free(&id);
         return false;
     }
-    return match_token(parser, TOKEN_SEMICOLON);
+    if (!match_token(parser, TOKEN_SEMICOLON)) {
+        report_error(parser, id.line, "expect ';' to end var decl");
+        abc_lexer_token_free(&id);
+        free_expr(decl->val.var.init);
+        return false;
+    }
+    return true;
 }
 
 static bool parse_stmt_decl(struct abc_parser *parser, struct abc_decl *decl) {
@@ -168,7 +224,7 @@ static bool parse_stmt(struct abc_parser *parser, struct abc_stmt *stmt) {
         case TOKEN_WHILE:
             stmt->tag = ABC_STMT_WHILE;
             return parse_while_stmt(parser, &stmt->val.while_stmt);
-        case TOKEN_RBRACE:
+        case TOKEN_LBRACE:
             stmt->tag = ABC_STMT_BLOCK;
             return parse_block_stmt(parser, &stmt->val.block_stmt);
         case TOKEN_PRINT:
@@ -185,32 +241,50 @@ static bool parse_stmt(struct abc_parser *parser, struct abc_stmt *stmt) {
 
 static bool parse_block_stmt(struct abc_parser *parser, struct abc_block_stmt *block) {
     if (!match_token(parser, TOKEN_LBRACE)) {
-        fprintf(stderr, "expected '{' to start block statement\n");
+        report_error(parser, abc_lexer_peek(parser->lexer).line, "expected '{' to start block statement");
         return false;
     }
     abc_arr_init(&block->decls, sizeof(struct abc_decl));
 
     struct abc_token token = abc_lexer_peek(parser->lexer);
+    bool has_err = false;
     while (token.type != TOKEN_EOF && token.type != TOKEN_RBRACE) {
         struct abc_decl decl;
         if (!parse_decl(parser, &decl)) {
-            fprintf(stderr, "failed to parse line in block statement\n");
-            return false;
+            report_error(parser, abc_lexer_peek(parser->lexer).line, "failed to parse line in block statement");
+            has_err = true;
+            break;
         }
         abc_arr_push(&block->decls, &decl);
         token = abc_lexer_peek(parser->lexer);
     }
-    if (token.type != TOKEN_EOF) {
-        abc_lexer_token_free(&token);
+    if (has_err) {
+        goto cleanup;
+    }
+    if (match_token(parser, TOKEN_RBRACE)) {
         return true;
     }
-    fprintf(stderr, "expected '}' to end block statement\n");
+    report_error(parser, abc_lexer_peek(parser->lexer).line, "expected '}' to end block statement");
+cleanup:
+    for (size_t i = 0; i < block->decls.len; i++) {
+        struct abc_decl decl = ((struct abc_decl *) block->decls.data)[i];
+        // TODO free_decl
+    }
     return false;
 }
 
 static bool parse_expr_stmt(struct abc_parser *parser, struct abc_expr_stmt *stmt) {
     stmt->expr = parse_expr(parser, 0);
-    return stmt->expr != NULL;
+    if (stmt->expr == NULL) {
+        report_error(parser, abc_lexer_peek(parser->lexer).line, "unable to parse expression stmt");
+        return false;
+    }
+    if (!match_token(parser, TOKEN_SEMICOLON)) {
+        report_error(parser, abc_lexer_peek(parser->lexer).line, "expected ';' to end expression statement");
+        free_expr(stmt->expr);
+        return false;
+    }
+    return true;
 }
 
 static bool parse_if_stmt(struct abc_parser *parser, struct abc_if_stmt *stmt) {
@@ -229,7 +303,7 @@ static bool parse_if_stmt(struct abc_parser *parser, struct abc_if_stmt *stmt) {
     }
     stmt->cond = expr;
     if (!match_token(parser, TOKEN_RPAREN)) {
-        free(expr);
+        free_expr(expr);
         fprintf(stderr, "expected ')' after 'if' condition\n");
         return false;
     }
@@ -336,6 +410,7 @@ static bool parse_return_stmt(struct abc_parser *parser, struct abc_return_stmt 
         (void) match_token(parser, TOKEN_SEMICOLON);
         stmt->has_expr = false;
         stmt->expr = NULL;
+        return true;
     }
 
     struct abc_expr *expr;
@@ -525,7 +600,7 @@ struct abc_expr *parse_infix_expr(struct abc_parser *parser, struct abc_expr *lh
     if (op.type == TOKEN_EQUALS) {
         // assign expr
         abc_lexer_token_free(&op);
-        if (lhs->tag != ABC_LITERAL_ID || lhs->val.lit_expr.lit.tag != ABC_LITERAL_ID) {
+        if (lhs->tag != ABC_EXPR_LITERAL || lhs->val.lit_expr.lit.tag != ABC_LITERAL_ID) {
             fprintf(stderr, "expected identifier as lhs of assignment\n");
             return NULL;
         }
