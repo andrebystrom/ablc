@@ -8,7 +8,8 @@ sources = [
         'src/main.c',
         'src/data/abc_arr.c',
         'src/abc_lexer.c',
-        'src/abc_parser.c'
+        'src/abc_parser.c',
+        'src/data/abc_pool.c'
 ]
 
 #ablc = executable('ablc', sources, c_args: '-fsanitize=address,leak,undefined', link_args: '-fsanitize=address,leak,undefined')
