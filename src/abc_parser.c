@@ -12,8 +12,9 @@
 #include "abc_lexer.h"
 #include "data/abc_arr.h"
 
-// TODO: make sure to call token_free where appropriate
-// TODO: move error handling to central function that sets error flag.
+// TODO: change all allocations to use pool allocations, also in the lexer. Remove free calls
+// N/A TODO: make sure to call token_free where appropriate
+// N/A TODO: move error handling to central function that sets error flag.
 
 static bool parse_fun_decl(struct abc_parser *parser, struct abc_fun_decl *fun_decl);
 static bool parse_decl(struct abc_parser *parser, struct abc_decl *decl);
@@ -65,7 +66,7 @@ void abc_parser_init(struct abc_parser *parser, struct abc_lexer *lexer) {
 
 struct abc_program abc_parser_parse(struct abc_parser *parser) {
     struct abc_program program;
-    abc_arr_init(&program.fun_decls, sizeof(struct abc_fun_decl));
+    abc_arr_init(&program.fun_decls, sizeof(struct abc_fun_decl), parser->pool);
 
     struct abc_token token;
     while ((token = abc_lexer_peek(parser->lexer)).type != TOKEN_EOF) {
@@ -83,7 +84,7 @@ struct abc_program abc_parser_parse(struct abc_parser *parser) {
 /* FUNCTIONS */
 
 static bool parse_fun_decl(struct abc_parser *parser, struct abc_fun_decl *fun_decl) {
-    abc_arr_init(&fun_decl->params, sizeof(struct abc_param));
+    abc_arr_init(&fun_decl->params, sizeof(struct abc_param), parser->pool);
     struct abc_token type_token = abc_lexer_next_token(parser->lexer);
     if (type_token.type != TOKEN_INT_TYPE && type_token.type != TOKEN_VOID_TYPE) {
         report_error(parser, type_token.line, "Expected int or void, got %s", type_token.lexeme);
@@ -244,7 +245,7 @@ static bool parse_block_stmt(struct abc_parser *parser, struct abc_block_stmt *b
         report_error(parser, abc_lexer_peek(parser->lexer).line, "expected '{' to start block statement");
         return false;
     }
-    abc_arr_init(&block->decls, sizeof(struct abc_decl));
+    abc_arr_init(&block->decls, sizeof(struct abc_decl), parser->pool);
 
     struct abc_token token = abc_lexer_peek(parser->lexer);
     bool has_err = false;
@@ -560,7 +561,7 @@ static struct abc_expr *parse_expr_postfix(struct abc_parser *parser, struct abc
     }
     struct abc_token token = abc_lexer_peek(parser->lexer);
     struct abc_arr args;
-    abc_arr_init(&args, sizeof(struct abc_expr *));
+    abc_arr_init(&args, sizeof(struct abc_expr *), parser->pool);
     bool has_err = false;
     while (token.type != TOKEN_RPAREN) {
         struct abc_expr *arg = parse_expr(parser, 0);
@@ -586,11 +587,6 @@ static struct abc_expr *parse_expr_postfix(struct abc_parser *parser, struct abc
         return res;
     }
     // cleanup
-    for (size_t i = 0; i < args.len; i++) {
-        struct abc_expr *arg = ((struct abc_expr **) args.data)[i];
-        free_expr(arg);
-    }
-    abc_arr_destroy(&args);
     return NULL;
 }
 
@@ -665,7 +661,6 @@ void free_expr(struct abc_expr *expr) {
                 struct abc_expr *arg = ((struct abc_expr **) expr->val.call_expr.args.data)[i];
                 free(arg);
             }
-            abc_arr_destroy(&expr->val.call_expr.args);
             free(expr);
             break;
         case ABC_EXPR_ASSIGN:

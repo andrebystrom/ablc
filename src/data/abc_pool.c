@@ -1,5 +1,6 @@
 #include "abc_pool.h"
 
+#include <assert.h>
 #include <stdio.h>
 
 struct abc_pool *abc_pool_create(void) {
@@ -15,25 +16,56 @@ struct abc_pool *abc_pool_create(void) {
     return pool;
 }
 
-void *abc_pool_alloc(struct abc_pool *pool, size_t size) {
-    return abc_pool_alloc_aligned(pool, size, FALLBACK_ALIGNMENT);
+void *abc_pool_alloc(struct abc_pool *pool, size_t size, size_t count) {
+    return abc_pool_alloc_aligned(pool, size, count, FALLBACK_ALIGNMENT);
 }
 
 /*
  * Get the last pool page.
  */
 static struct abc_pool *find_page(struct abc_pool *pool) {
-    for (; pool != NULL; pool = pool->next) {
-        if (pool->next == NULL) {
-            break;
-        }
+    while (pool->next != NULL) {
+        pool = pool->next;
     }
     return pool;
 }
 
-void *abc_pool_alloc_aligned(struct abc_pool *pool, size_t size, size_t alignment) {
+static void alloc_page(struct abc_pool *pool, size_t size, size_t count) {
+    size_t alloc_size = size * count > ABC_POOL_SIZE ? size * count : ABC_POOL_SIZE;
+    pool->data = malloc(alloc_size);
+    if (pool->data == NULL) {
+        fprintf(stderr, "pool allocation failed %s\n", __FILE__);
+        exit(EXIT_FAILURE);
+    }
+    pool->capacity = alloc_size;
+    pool->offset = 0;
+}
+
+void *abc_pool_alloc_aligned(struct abc_pool *pool, size_t size, size_t count, size_t alignment) {
+    assert(pool != NULL);
     pool = find_page(pool);
-    return NULL;
+    // init page if not already
+    if (pool->capacity == 0) {
+        alloc_page(pool, size, count);
+    }
+    // get offset that we need
+    size_t start = pool->offset + alignment & ~(alignment - 1);
+    if (start + size * count >= pool->capacity) {
+        size_t offset = size * count + alignment & ~(alignment - 1);
+        // does not fit current page, create new and put it there
+        pool->next = malloc(sizeof(struct abc_pool));
+        pool = pool->next;
+        pool->next = NULL;
+        if (pool == NULL) {
+            fprintf(stderr, "pool allocation failed %s\n", __FILE__);
+            exit(EXIT_FAILURE);
+        }
+        alloc_page(pool->next, size, count);
+        pool->offset = offset;
+        return pool->data;
+    }
+    pool->offset = start + size * count;
+    return pool->data + start;
 }
 
 void abc_pool_destroy(struct abc_pool *pool) {

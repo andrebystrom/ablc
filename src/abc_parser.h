@@ -264,6 +264,7 @@ struct abc_program {
 struct abc_parser {
     struct abc_lexer *lexer;
     bool has_error;
+    struct abc_pool *pool;
 };
 
 void abc_parser_init(struct abc_parser *parser, struct abc_lexer *lexer);
