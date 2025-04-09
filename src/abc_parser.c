@@ -1,9 +1,3 @@
-/**
- * Error model is that only the 'root' allocation needs to be handled/freed by the caller, any allocations made
- * by the callee is freed by the callee on error. Only expressions, the branches of if statements, and the body of while
- * loops are heap allocated.
- */
-
 #include "abc_parser.h"
 
 #include <assert.h>
@@ -51,6 +45,7 @@ static bool match_token(struct abc_parser *parser, enum abc_token_type type) {
     if (token.type == type) {
         return true;
     }
+    // TODO: get a str instead of the int value for the token type...
     report_error(parser, token.line, "expect %d got %d", type, token.type);
     return false;
 }
