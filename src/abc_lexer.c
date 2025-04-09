@@ -15,22 +15,17 @@ static bool match(const struct abc_lexer *lexer, char c);
 static void lex_int(struct abc_lexer *lexer, uint8_t start, struct abc_token *token);
 static void lex_keyword_or_identifier(struct abc_lexer *lexer, uint8_t start, struct abc_token *token);
 
-static char *my_strdup(const uint8_t *src, int len) {
-    char *result = malloc(len + 1);
-    if (!result) {
-        perror(__FILE__ ": strndup");
-        exit(EXIT_FAILURE);
-    }
+static char *my_strdup(struct abc_pool *pool, const uint8_t *src, int len) {
+    char *result = abc_pool_alloc(pool, len + 1, 1);
     strncpy(result, (char *) src, len);
     result[len] = '\0';
     return result;
 }
 
-void abc_lexer_token_free(struct abc_token *token) {
-    free(token->lexeme);
+void abc_lexer_destroy(struct abc_lexer *lexer) {
+    fclose(lexer->file);
+    abc_pool_destroy(lexer->pool);
 }
-
-void abc_lexer_destroy(struct abc_lexer *lexer) { fclose(lexer->file); }
 
 bool abc_lexer_init(struct abc_lexer *lexer, const char *filename) {
     lexer->file = fopen(filename, "r");
@@ -45,6 +40,7 @@ bool abc_lexer_init(struct abc_lexer *lexer, const char *filename) {
     lexer->buf_pos = 0;
 
     lexer->has_peek = lexer->is_eof = false;
+    lexer->pool = abc_pool_create();
 
     return true;
 }
@@ -80,7 +76,7 @@ struct abc_token abc_lexer_next_token(struct abc_lexer *lexer) {
         if (ch == '+' || ch == '-' || ch == '*' || ch == '/' || ch == '(' || ch == ')' || ch == '{' || ch == '}' ||
             ch == ',' || ch == ';') {
             result.line = lexer->line;
-            result.lexeme = my_strdup(&ch, 1);
+            result.lexeme = my_strdup(lexer->pool, &ch, 1);
             if (ch == '+')
                 result.type = TOKEN_PLUS;
             else if (ch == '-')
@@ -157,10 +153,10 @@ static void max_munch(const struct abc_lexer *lexer, const enum abc_token_type t
     if (match(lexer, '=')) {
         buf[1] = '=';
         token->type = type + 1;
-        token->lexeme = my_strdup((uint8_t *) buf, 2);
+        token->lexeme = my_strdup(lexer->pool, (uint8_t *) buf, 2);
     } else {
         token->type = type;
-        token->lexeme = my_strdup((uint8_t *) buf, 1);
+        token->lexeme = my_strdup(lexer->pool, (uint8_t *) buf, 1);
     }
 }
 
@@ -195,7 +191,7 @@ static void lex_int(struct abc_lexer *lexer, uint8_t start, struct abc_token *to
     }
     token->line = lexer->line;
     token->type = TOKEN_INT;
-    token->lexeme = my_strdup(lexer->buf, lexer->buf_pos);
+    token->lexeme = my_strdup(lexer->pool, lexer->buf, lexer->buf_pos);
     token->data = (void *) res;
     errno = errnocpy;
     return;
@@ -203,7 +199,7 @@ static void lex_int(struct abc_lexer *lexer, uint8_t start, struct abc_token *to
 err:
     lexer->has_error = true;
     token->type = TOKEN_ERROR;
-    token->lexeme = my_strdup((uint8_t *)"invalid integer token", sizeof("invalid integer token") - 1);
+    token->lexeme = my_strdup(lexer->pool, (uint8_t *)"invalid integer token", sizeof("invalid integer token") - 1);
     token->line = lexer->line;
     fprintf(stderr, "Failed to lex int at line %d\n", lexer->line);
     errno = errnocpy;
@@ -225,14 +221,14 @@ static void lex_keyword_or_identifier(struct abc_lexer *lexer, uint8_t start, st
     token->line = lexer->line;
     if (err) {
         token->type = TOKEN_ERROR;
-        token->lexeme = my_strdup(lexer->buf, lexer->buf_pos);
+        token->lexeme = my_strdup(lexer->pool, lexer->buf, lexer->buf_pos);
         lexer->has_error = true;
         fprintf(stderr, "Failed to lex keyword or identifier at line %d: %.*s\n", lexer->line, lexer->buf_pos,
                 (char *) lexer->buf);
         return;
     }
 
-    token->lexeme = my_strdup(lexer->buf, lexer->buf_pos);
+    token->lexeme = my_strdup(lexer->pool, lexer->buf, lexer->buf_pos);
     char *buf = (char *) lexer->buf;
     if (lexer->buf_pos == 2 && strncmp(buf, "if", lexer->buf_pos) == 0) {
         token->type = TOKEN_IF;

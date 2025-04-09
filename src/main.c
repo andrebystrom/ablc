@@ -38,7 +38,6 @@ void doLex(char *file) {
             printf("%d\n", (int) (long) token.data);
         }
         printf("\n");
-        abc_lexer_token_free(&token);
     }
     printf("lexer err: %s\n", lexer.has_error ? "yes" : "no");
     abc_lexer_destroy(&lexer);
@@ -58,4 +57,7 @@ void doParse(char *file) {
         exit(EXIT_FAILURE);
     }
     printf("parsed %lu fun decls\n", program.fun_decls.len);
+    abc_parser_print(&program, stdout);
+    abc_parser_destroy(&parser);
+    abc_lexer_destroy(&lexer);
 }

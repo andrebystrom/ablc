@@ -21,17 +21,13 @@ void *abc_arr_push(struct abc_arr *arr, void *data) {
         memcpy(tmp, data, arr->len);
         arr->data = tmp;
     }
-    memmove((char *) arr->data + arr->len, data, arr->elem_size);
-    return (char *) arr->data + (arr->len++);
+    memmove((char *) arr->data + arr->elem_size * arr->len, data, arr->elem_size);
+    return (char *) arr->data + arr->elem_size * (arr->len++);
 }
 
 void abc_arr_migrate_pool(struct abc_arr *arr, struct abc_pool *pool) {
-    (void) arr;
-    (void) pool;
-    // TODO: change pool to new, maybe also destroy current pool (or flag) (?)
-    // allocate and copy data to new pool.
-}
-
-void abc_arr_destroy(struct abc_arr *arr) {
-    free(arr->data);
+    void *new_data = abc_pool_alloc(pool, arr->elem_size, arr->cap);
+    memcpy(new_data, arr->data, arr->len);
+    abc_pool_destroy(arr->pool);
+    arr->pool = pool;
 }

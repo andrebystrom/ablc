@@ -11,6 +11,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "data/abc_pool.h"
+
 #define ABC_LEXER_BUFFER_SIZE 1024
 
 // Order for TOKEN_X, TOKEN_X_EQUALS matter for lexer.
@@ -71,6 +73,7 @@ struct abc_lexer {
     struct abc_token peeked;
 
     bool is_eof;
+    struct abc_pool *pool;
 };
 
 /**
