@@ -600,7 +600,7 @@ static void print_stmt(struct abc_stmt *stmt, FILE *f, int indent) {
         case ABC_STMT_WHILE:
             break;
         case ABC_STMT_BLOCK:
-            print_block_stmt(&stmt->val.block_stmt, f);
+            print_block_stmt(&stmt->val.block_stmt, f, indent);
             break;
         case ABC_STMT_PRINT:
             break;
@@ -622,7 +622,7 @@ static void print_expr(struct abc_expr *expr, FILE *f) {
 static void print_fun_decl(struct abc_fun_decl *fun_decl, FILE *f) {
     fprintf(f, "%s ", fun_decl->type == ABC_TYPE_INT ? "int" : "void");
     fprintf(f, "%s(", fun_decl->name.lexeme);
-    for (int i = 0; i < fun_decl->params.len; i++) {
+    for (size_t i = 0; i < fun_decl->params.len; i++) {
         struct abc_param param = ((struct abc_param *)fun_decl->params.data)[i];
         fprintf(f, "%s ", param.type == ABC_TYPE_INT ? "int" : "void");
         fprintf(f, "%s", param.token.lexeme);
