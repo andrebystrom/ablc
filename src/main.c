@@ -5,8 +5,8 @@
 #include "abc_lexer.h"
 #include "abc_parser.h"
 
-void doLex(char *file);
-void doParse(char *file);
+void do_lex(char *file);
+void do_parse(char *file);
 
 int main(int argc, char **argv) {
     if (argc < 2) {
@@ -16,15 +16,15 @@ int main(int argc, char **argv) {
         // Do compile
     }
     else if (strcmp(argv[1], "lex") == 0) {
-        doLex(argv[2]);
+        do_lex(argv[2]);
     }
     else if (strcmp(argv[1], "parse") == 0) {
-        doParse(argv[2]);
+        do_parse(argv[2]);
     }
     return 0;
 }
 
-void doLex(char *file) {
+void do_lex(char *file) {
     struct abc_lexer lexer;
     if (!abc_lexer_init(&lexer, file)) {
         exit(EXIT_FAILURE);
@@ -43,7 +43,7 @@ void doLex(char *file) {
     abc_lexer_destroy(&lexer);
 }
 
-void doParse(char *file) {
+void do_parse(char *file) {
     struct abc_lexer lexer;
     if (!abc_lexer_init(&lexer, file)) {
         fprintf(stderr, "failed to init lexer\n");

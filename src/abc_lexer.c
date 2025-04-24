@@ -252,3 +252,72 @@ static void lex_keyword_or_identifier(struct abc_lexer *lexer, uint8_t start, st
         token->type = TOKEN_IDENTIFIER;
     }
 }
+
+const char *abc_lexer_token_type_str(enum abc_token_type type)  {
+    switch (type) {
+        case TOKEN_EQUALS:
+            return "=";
+        case TOKEN_EQUALS_EQUALS:
+            return "==";
+        case TOKEN_LESS:
+            return "<";
+        case TOKEN_LESS_EQUALS:
+            return "<=";
+        case TOKEN_GREATER:
+            return ">";
+        case TOKEN_GREATER_EQUALS:
+            return ">=";
+        case TOKEN_BANG:
+            return "!";
+        case TOKEN_BANG_EQUALS:
+            return "!=";
+        case TOKEN_PLUS:
+            return "+";
+        case TOKEN_MINUS:
+            return "-";
+        case TOKEN_STAR:
+            return "*";
+        case TOKEN_SLASH:
+            return "/";
+        case TOKEN_LPAREN:
+            return "(";
+        case TOKEN_RPAREN:
+            return ")";
+        case TOKEN_LBRACE:
+            return "{";
+        case TOKEN_RBRACE:
+            return "}";
+        case TOKEN_COMMA:
+            return ",";
+        case TOKEN_SEMICOLON:
+            return ";";
+        case TOKEN_AND:
+            return "and";
+        case TOKEN_OR:
+            return "or";
+        case TOKEN_IF:
+            return "if";
+        case TOKEN_ELSE:
+            return "else";
+        case TOKEN_WHILE:
+            return "while";
+        case TOKEN_PRINT:
+            return "print";
+        case TOKEN_RETURN:
+            return "return";
+        case TOKEN_INT_TYPE:
+            return "int";
+        case TOKEN_VOID_TYPE:
+            return "void";
+        case TOKEN_INT:
+            return "<int>";
+        case TOKEN_IDENTIFIER:
+            return "<id>";
+        case TOKEN_ERROR:
+            return "<ERROR>";
+        case TOKEN_EOF:
+            return "<EOF>";
+        default:
+            return "<unknown>";
+    }
+}

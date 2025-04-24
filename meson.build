@@ -9,6 +9,7 @@ sources = [
         'src/data/abc_arr.c',
         'src/abc_lexer.c',
         'src/abc_parser.c',
+        'src/abc_typechecker.c',
         'src/data/abc_pool.c'
 ]
 

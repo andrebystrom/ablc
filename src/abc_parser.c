@@ -46,7 +46,8 @@ static bool match_token(struct abc_parser *parser, enum abc_token_type type) {
         return true;
     }
     // TODO: get a str instead of the int value for the token type...
-    report_error(parser, token.line, "expect %d got %d", type, token.type);
+    report_error(parser, token.line, "expect %s got %s",
+        abc_lexer_token_type_str(type), abc_lexer_token_type_str(token.type));
     return false;
 }
 
@@ -275,7 +276,7 @@ static bool parse_if_stmt(struct abc_parser *parser, struct abc_if_stmt *stmt) {
     const struct abc_token token = abc_lexer_peek(parser->lexer);
     if (token.type != TOKEN_ELSE) {
         stmt->has_else = false;
-        stmt->then_stmt = NULL;
+        stmt->else_stmt = NULL;
         return true;
     }
     stmt->has_else = true;
@@ -400,7 +401,7 @@ static struct abc_expr *parse_expr(struct abc_parser *parser, int precedence) {
     while (1) {
         struct abc_token token = abc_lexer_peek(parser->lexer);
         if ((right_bp = right_binding_powers[token.type]) > 0) {
-            if (right_bp > precedence) {
+            if (right_bp < precedence) {
                 break;
             }
             struct abc_expr *tmp = parse_expr_postfix(parser, lhs);
@@ -494,7 +495,7 @@ static struct abc_expr *parse_expr_postfix(struct abc_parser *parser, struct abc
             has_err = true;
             break;
         }
-        abc_arr_push(&args, arg);
+        abc_arr_push(&args, &arg);
         token = abc_lexer_peek(parser->lexer);
         if (token.type == TOKEN_COMMA) {
             (void) match_token(parser, token.type);
@@ -505,10 +506,10 @@ static struct abc_expr *parse_expr_postfix(struct abc_parser *parser, struct abc
     if (!has_err) {
         (void) match_token(parser, TOKEN_RPAREN);
         struct abc_expr *res = abc_expr(parser->pool);
+        abc_arr_migrate_pool(&args, parser->pool);
         res->tag = ABC_EXPR_CALL;
         res->val.call_expr.args = args;
         res->val.call_expr.callee = lhs->val.lit_expr.lit;
-        abc_arr_migrate_pool(&args, parser->pool);
         return res;
     }
     // cleanup
@@ -563,11 +564,18 @@ struct abc_expr *parse_infix_expr(struct abc_parser *parser, struct abc_expr *lh
 static void print_stmt(struct abc_stmt *stmt, FILE *f, int indent);
 static void print_expr(struct abc_expr *expr, FILE *f);
 
+static void print_indent(int indent, FILE *f) {
+    for (int i = 0; i < indent * 4; i++) {
+        fputc(' ', f);
+    }
+}
+
 static void print_decl(struct abc_decl *decl, FILE *f, int indent) {
     if (decl->tag == ABC_DECL_STMT) {
         print_stmt(&decl->val.stmt.stmt, f, indent);
     } else {
         struct abc_var_decl var_decl = decl->val.var;
+        print_indent(indent, f);
         fprintf(f, "%s ", var_decl.type == ABC_TYPE_INT ? "int" : "void");
         fprintf(f, "%s", var_decl.name.lexeme);
         if (!var_decl.has_init) {
@@ -586,37 +594,104 @@ static void print_block_stmt(struct abc_block_stmt *block_stmt, FILE *f, int ind
         struct abc_decl decl = ((struct abc_decl *)block_stmt->decls.data)[i];
         print_decl(&decl, f, indent);
     }
+    print_indent(indent - 1, f);
     fprintf(f, "}\n");
 }
 
 static void print_stmt(struct abc_stmt *stmt, FILE *f, int indent) {
     switch (stmt->tag) {
         case ABC_STMT_EXPR:
+            print_indent(indent, f);
             print_expr(stmt->val.expr_stmt.expr, f);
             fprintf(f, ";\n");
             break;
         case ABC_STMT_IF:
+            print_indent(indent, f);
+            fprintf(f, "if (");
+            print_expr(stmt->val.if_stmt.cond, f);
+            fprintf(f, ")");
+            print_stmt(stmt->val.if_stmt.then_stmt, f, indent);
+            if (stmt->val.if_stmt.has_else) {
+                print_indent(indent, f);
+                fprintf(f, "else ");
+                print_stmt(stmt->val.if_stmt.else_stmt, f, indent);
+            }
             break;
         case ABC_STMT_WHILE:
+            print_indent(indent, f);
+            fprintf(f, "while (");
+            print_expr(stmt->val.while_stmt.cond, f);
+            fprintf(f, ")");
+            print_stmt(stmt->val.while_stmt.body, f, indent + 1);
             break;
         case ABC_STMT_BLOCK:
-            print_block_stmt(&stmt->val.block_stmt, f, indent);
+            print_block_stmt(&stmt->val.block_stmt, f, indent + 1);
             break;
         case ABC_STMT_PRINT:
+            print_indent(indent, f);
+            fprintf(f, "print(");
+            print_expr(stmt->val.print_stmt.expr, f);
+            fprintf(f, ");\n");
             break;
         case ABC_STMT_RETURN:
+            print_indent(indent, f);
             fprintf(f, "return");
-            if (!stmt->val.return_stmt.has_expr) {
-                fprintf(f, ";\n");
+            if (stmt->val.return_stmt.has_expr) {
+                fprintf(f, " ");
+                print_expr(stmt->val.return_stmt.expr, f);
             }
-            print_expr(stmt->val.return_stmt.expr, f);
             fprintf(f, ";\n");
             break;
     }
 }
 
 static void print_expr(struct abc_expr *expr, FILE *f) {
-
+    switch (expr->tag) {
+        case ABC_EXPR_BINARY:
+            fprintf(f, "(");
+            print_expr(expr->val.bin_expr.left, f);
+            fprintf(f, " %s ", expr->val.bin_expr.op.lexeme);
+            print_expr(expr->val.bin_expr.right, f);
+            fprintf(f, ")");
+            break;
+        case ABC_EXPR_UNARY:
+            fprintf(f, "(");
+            fprintf(f, "%s", expr->val.unary_expr.op.lexeme);
+            print_expr(expr->val.unary_expr.expr, f);
+            fprintf(f, ")");
+            break;
+        case ABC_EXPR_CALL:
+            fprintf(f, "%s", expr->val.call_expr.callee.val.identifier.lexeme);
+            fprintf(f, "(");
+            for (size_t i = 0; i < expr->val.call_expr.args.len; i++) {
+                struct abc_expr *arg = ((struct abc_expr **) expr->val.call_expr.args.data)[i];
+                print_expr(arg, f);
+                if (i < expr->val.call_expr.args.len - 1) {
+                    fprintf(f, ", ");
+                }
+            }
+            fprintf(f, ")");
+            break;
+        case ABC_EXPR_LITERAL:
+            if (expr->val.lit_expr.lit.tag == ABC_LITERAL_INT) {
+                fprintf(f, "%ld", expr->val.lit_expr.lit.val.integer);
+            } else {
+                fprintf(f, "%s", expr->val.lit_expr.lit.val.identifier.lexeme);
+            }
+            break;
+        case ABC_EXPR_ASSIGN:
+            fprintf(f, "(");
+            fprintf(f, "%s", expr->val.assign_expr.lit.val.identifier.lexeme);
+            fprintf(f, " = ");
+            print_expr(expr->val.assign_expr.expr, f);
+            fprintf(f, ")");
+            break;
+        case ABC_EXPR_GROUPING:
+            fprintf(f, "(");
+            print_expr(expr->val.grouping_expr.expr, f);
+            fprintf(f, ")");
+            break;
+    }
 }
 
 static void print_fun_decl(struct abc_fun_decl *fun_decl, FILE *f) {

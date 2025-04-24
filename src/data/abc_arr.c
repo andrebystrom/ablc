@@ -27,7 +27,8 @@ void *abc_arr_push(struct abc_arr *arr, void *data) {
 
 void abc_arr_migrate_pool(struct abc_arr *arr, struct abc_pool *pool) {
     void *new_data = abc_pool_alloc(pool, arr->elem_size, arr->cap);
-    memcpy(new_data, arr->data, arr->len);
+    memcpy(new_data, arr->data, arr->len * arr->elem_size);
     abc_pool_destroy(arr->pool);
     arr->pool = pool;
+    arr->data = new_data;
 }

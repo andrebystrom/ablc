@@ -50,6 +50,8 @@ enum abc_token_type {
     TOKEN_EOF // this needs to be last, relied upon for lookup tables.
 };
 
+const char *abc_lexer_token_type_str(enum abc_token_type type);
+
 struct abc_token {
     enum abc_token_type type;
     int line;
