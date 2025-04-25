@@ -3,8 +3,14 @@
 
 #include <stdbool.h>
 
+#include "data/abc_pool.h"
+#include "data/abc_arr.h"
 #include "abc_parser.h"
 
-bool abc_typechecker_typecheck(struct abc_program *program);
+struct abc_typechecker;
 
-#endif //ABC_TYPECHECKER_H
+void abc_typechecker_init(struct abc_typechecker *typechecker);
+void abc_typechecker_destroy(struct abc_typechecker *typechecker);
+bool abc_typechecker_typecheck(struct abc_typechecker *typechecker, struct abc_program *program);
+
+#endif // ABC_TYPECHECKER_H
