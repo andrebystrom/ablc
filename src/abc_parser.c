@@ -233,6 +233,7 @@ static bool parse_block_stmt(struct abc_parser *parser, struct abc_block_stmt *b
         abc_pool_destroy(block->decls.pool);
         return false;
     }
+    abc_arr_migrate_pool(&block->decls, parser->pool);
     return true;
 }
 

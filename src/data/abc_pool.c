@@ -61,7 +61,7 @@ void *abc_pool_alloc_aligned(struct abc_pool *pool, size_t size, size_t count, s
             fprintf(stderr, "pool allocation failed %s\n", __FILE__);
             exit(EXIT_FAILURE);
         }
-        alloc_page(pool->next, size, count);
+        alloc_page(pool, size, count);
         pool->offset = offset;
         return pool->data;
     }

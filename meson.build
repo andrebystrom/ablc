@@ -13,6 +13,6 @@ sources = [
         'src/data/abc_pool.c'
 ]
 
-#ablc = executable('ablc', sources, c_args: '-fsanitize=address,leak,undefined', link_args: '-fsanitize=address,leak,undefined')
-ablc = executable('ablc', sources)
+ablc = executable('ablc', sources, c_args: '-fsanitize=address,leak,undefined', link_args: '-fsanitize=address,leak,undefined')
+#ablc = executable('ablc', sources)
 test('test', ablc)
