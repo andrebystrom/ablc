@@ -10,7 +10,8 @@ sources = [
         'src/abc_lexer.c',
         'src/abc_parser.c',
         'src/abc_typechecker.c',
-        'src/data/abc_pool.c'
+        'src/data/abc_pool.c',
+        'src/codegen/ir.c'
 ]
 
 #ablc = executable('ablc', sources, c_args: '-fsanitize=address,leak,undefined', link_args: '-fsanitize=address,leak,undefined')
