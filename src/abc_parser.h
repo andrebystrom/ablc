@@ -1,6 +1,5 @@
 /**
- * parse tree where only expressions, the branches of if statements, and the body of while loops are heap
- * allocated.
+ * parser that produces basic parse tree.
 */
 #ifndef ABC_PARSER_H
 #define ABC_PARSER_H
@@ -210,12 +209,16 @@ struct abc_parser {
     struct abc_pool *pool;
 };
 
+// Initialize the parser.
 void abc_parser_init(struct abc_parser *parser, struct abc_lexer *lexer);
 
+// Destroy the parser, deleting all memory allocated by it (including the parse tree).
 void abc_parser_destroy(struct abc_parser *parser);
 
 void abc_parser_print(struct abc_program *program, FILE *f);
 
+// Parse and return the parse tree. If parse errors are encountered, parser->has_error is true. The lexer should
+// also be checked for errors.
 struct abc_program abc_parser_parse(struct abc_parser *parser);
 
 #endif //ABC_PARSER_H

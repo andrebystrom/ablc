@@ -108,7 +108,7 @@ struct abc_token abc_lexer_peek(struct abc_lexer *lexer);
 void abc_lexer_token_free(struct abc_token *token);
 
 /**
- * Destroys the lexer, closing the file etc.
+ * Destroys the lexer, closing the file, deleting all memory allocated (including for token lexemes etc.).
  * @param lexer the lexer to destroy.
  */
 void abc_lexer_destroy(struct abc_lexer *lexer);

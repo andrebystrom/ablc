@@ -361,6 +361,7 @@ static bool parse_return_stmt(struct abc_parser *parser, struct abc_return_stmt 
         return false;
     }
     stmt->expr = expr;
+    stmt->has_expr = true;
     return true;
 }
 
