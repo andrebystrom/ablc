@@ -94,7 +94,7 @@ struct ir_expr_call {
 
 struct ir_expr_assign {
     char *label; // assign to
-    struct ir_atom value;
+    struct ir_expr *value;
 };
 
 struct ir_expr {
@@ -165,6 +165,12 @@ struct ir_translator {
     struct abc_arr ir_funs; // ir_fun_data
     struct abc_arr ir_params; // ir_param_data
     char *curr_fun_label;
+    struct ir_block *curr_block;
+    struct abc_pool *pool;
 };
+
+void ir_translator_init(struct ir_translator *translator);
+void ir_translator_destroy(struct ir_translator *translator);
+struct ir_program ir_translate(struct ir_translator *translator, struct abc_program *program);
 
 #endif // IR_H
