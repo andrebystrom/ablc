@@ -8,6 +8,7 @@
 #include <stdbool.h>
 
 #include "abc_parser.h"
+#include "abc_type.h"
 #include "data/abc_arr.h"
 #include "data/abc_pool.h"
 

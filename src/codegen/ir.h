@@ -5,6 +5,8 @@
 
 #include "../data/abc_arr.h"
 #include "../data/abc_pool.h"
+#include "../abc_type.h"
+#include "../abc_parser.h"
 
 enum ir_cmp { IR_CMP_EQ, IR_CMP_NE, IR_CMP_LT, IR_CMP_GT, IR_CMP_LE, IR_CMP_GE };
 

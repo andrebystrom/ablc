@@ -50,9 +50,9 @@ void *abc_pool_alloc_aligned(struct abc_pool *pool, size_t size, size_t count, s
     }
     // get offset that we need
     // TODO: also take start address of data into consideration, is however malloc'd so probably fine.
-    size_t start = pool->offset + alignment & ~(alignment - 1);
+    size_t start = (pool->offset + alignment) & ~(alignment - 1);
     if (start + size * count >= pool->capacity) {
-        size_t offset = size * count + alignment & ~(alignment - 1);
+        size_t offset = (size * count + alignment) & ~(alignment - 1);
         // does not fit current page, create new and put it there
         pool->next = malloc(sizeof(struct abc_pool));
         pool = pool->next;

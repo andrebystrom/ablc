@@ -5,17 +5,15 @@
 
 struct abc_typechecker {
     struct abc_pool *pool;
-    enum abc_type curr_fun_type;
+    enum abc_parser_type curr_fun_type;
     // TODO: these should be a map for better efficiency
     struct abc_arr types;
     struct abc_arr formals;
 };
 
-enum typecheck_type { TYPE_VOID, TYPE_INT, TYPE_BOOL };
-
 struct type {
     char *name;
-    enum typecheck_type type;
+    enum abc_type type;
     bool marker;
 };
 
@@ -23,13 +21,13 @@ struct type {
 struct formals {
     char *name;
     struct abc_arr types;
-    enum typecheck_type ret_type;
+    enum abc_type ret_type;
     bool marker;
 };
 
 struct typecheck_result {
     bool err;
-    enum typecheck_type type;
+    enum abc_type type;
 };
 
 void abc_typechecker_init(struct abc_typechecker *typechecker) {
@@ -161,11 +159,15 @@ bool abc_typechecker_typecheck(struct abc_program *program) {
 }
 
 static struct typecheck_result typecheck_fun(struct abc_typechecker *tc, struct abc_fun_decl *fun) {
-    struct formals formals = {.marker = false, .name = fun->name.lexeme, .ret_type = (enum typecheck_type) fun->type};
+    struct formals formals = {.marker = false, .name = fun->name.lexeme, .ret_type = (enum abc_type) fun->type};
     abc_arr_init(&formals.types, sizeof(struct type), tc->pool);
     for (size_t i = 0; i < fun->params.len; i++) {
         struct abc_param param = ((struct abc_param *) fun->params.data)[i];
-        enum typecheck_type type = (enum typecheck_type) param.type;
+        if (param.type == PARSER_TYPE_VOID) {
+            fprintf(stderr, "void cannot be used as a function parameter\n");
+            return (struct typecheck_result) {.err = true};
+        }
+        enum abc_type type = (enum abc_type) param.type;
         struct type t = {.marker = false, .name = param.token.lexeme, .type = type};
         abc_arr_push(&formals.types, &t);
     }
@@ -179,18 +181,18 @@ static struct typecheck_result typecheck_fun(struct abc_typechecker *tc, struct 
 }
 
 static struct typecheck_result typecheck_decl(struct abc_typechecker *tc, struct abc_decl *decl) {
-    struct type type;
+    struct type type = {0};
     switch (decl->tag) {
         case ABC_DECL_VAR:
             type.name = decl->val.var.name.lexeme;
-            type.type = (enum typecheck_type) decl->val.var.type;
-            if (type.type == TYPE_VOID) {
+            type.type = (enum abc_type) decl->val.var.type;
+            if (type.type == ABC_TYPE_VOID) {
                 fprintf(stderr, "cannot declare variable of type void\n");
                 return (struct typecheck_result) {.err = true};
             }
             if (decl->val.var.has_init) {
                 struct typecheck_result result = typecheck_expr(tc, decl->val.var.init);
-                if (result.err || result.type != (enum typecheck_type) decl->val.var.type) {
+                if (result.err || result.type != (enum abc_type) decl->val.var.type) {
                     if (!result.err) {
                         fprintf(stderr, "type mismatch for decl %s\n", decl->val.var.name.lexeme);
                     }
@@ -205,6 +207,7 @@ static struct typecheck_result typecheck_decl(struct abc_typechecker *tc, struct
         case ABC_DECL_STMT:
             return typecheck_stmt(tc, &decl->val.stmt.stmt);
     }
+    assert(0);
 }
 
 static struct typecheck_result typecheck_stmt(struct abc_typechecker *tc, struct abc_stmt *stmt) {
@@ -217,7 +220,7 @@ static struct typecheck_result typecheck_stmt(struct abc_typechecker *tc, struct
             if (res.err) {
                 return (struct typecheck_result) {.err = true};
             }
-            if (res.type != TYPE_BOOL) {
+            if (res.type != ABC_TYPE_BOOL) {
                 fprintf(stderr, "expect bool in if condition\n");
                 return (struct typecheck_result) {.err = true};
             }
@@ -237,7 +240,7 @@ static struct typecheck_result typecheck_stmt(struct abc_typechecker *tc, struct
             if (res.err) {
                 return (struct typecheck_result) {.err = true};
             }
-            if (res.type != TYPE_BOOL) {
+            if (res.type != ABC_TYPE_BOOL) {
                 fprintf(stderr, "expect bool in while condition\n");
                 return (struct typecheck_result) {.err = true};
             }
@@ -246,7 +249,7 @@ static struct typecheck_result typecheck_stmt(struct abc_typechecker *tc, struct
             return typecheck_block_stmt(tc, &stmt->val.block_stmt);
         case ABC_STMT_PRINT:
             res = typecheck_expr(tc, stmt->val.print_stmt.expr);
-            if (res.type == TYPE_VOID) {
+            if (res.type == ABC_TYPE_VOID) {
                 fprintf(stderr, "expect non-void expr in print statement\n");
                 return (struct typecheck_result) {.err = true};
             }
@@ -257,12 +260,12 @@ static struct typecheck_result typecheck_stmt(struct abc_typechecker *tc, struct
                 if (res.err) {
                     return (struct typecheck_result) {.err = true};
                 }
-                if (res.type != (enum typecheck_type) tc->curr_fun_type) {
+                if (res.type != (enum abc_type) tc->curr_fun_type) {
                     fprintf(stderr, "type mismatch for return statement\n");
                     return (struct typecheck_result) {.err = true};
                 }
             } else {
-                if (tc->curr_fun_type != TYPE_VOID) {
+                if (tc->curr_fun_type != PARSER_TYPE_VOID) {
                     fprintf(stderr, "type mismatch for return statement\n");
                     return (struct typecheck_result) {.err = true};
                 }
@@ -292,20 +295,33 @@ static struct typecheck_result typecheck_call_expr(struct abc_typechecker *tc, s
 static struct typecheck_result typecheck_lit_expr(struct abc_typechecker *tc, struct abc_lit_expr *expr);
 static struct typecheck_result typecheck_assign_expr(struct abc_typechecker *tc, struct abc_assign_expr *expr);
 static struct typecheck_result typecheck_expr(struct abc_typechecker *tc, struct abc_expr *expr) {
+    struct typecheck_result result;
     switch (expr->tag) {
         case ABC_EXPR_BINARY:
-            return typecheck_bin_expr(tc, &expr->val.bin_expr);
+            result = typecheck_bin_expr(tc, &expr->val.bin_expr);
+            break;
         case ABC_EXPR_UNARY:
-            return typecheck_unary_expr(tc, &expr->val.unary_expr);
+            result = typecheck_unary_expr(tc, &expr->val.unary_expr);
+            break;
         case ABC_EXPR_CALL:
-            return typecheck_call_expr(tc, &expr->val.call_expr);
+            result = typecheck_call_expr(tc, &expr->val.call_expr);
+            break;
         case ABC_EXPR_LITERAL:
-            return typecheck_lit_expr(tc, &expr->val.lit_expr);
+            result = typecheck_lit_expr(tc, &expr->val.lit_expr);
+            break;
         case ABC_EXPR_ASSIGN:
-            return typecheck_assign_expr(tc, &expr->val.assign_expr);
+            result = typecheck_assign_expr(tc, &expr->val.assign_expr);
+            break;
         case ABC_EXPR_GROUPING:
-            return typecheck_expr(tc, expr->val.grouping_expr.expr);
+            result = typecheck_expr(tc, expr->val.grouping_expr.expr);
+            break;
+        default:
+            assert(0);
     }
+    if (!result.err) {
+        expr->type = result.type;
+    }
+    return result;
 }
 
 static struct typecheck_result typecheck_bin_expr(struct abc_typechecker *tc, struct abc_bin_expr *expr) {
@@ -317,20 +333,20 @@ static struct typecheck_result typecheck_bin_expr(struct abc_typechecker *tc, st
     }
 
     if (expr->op.type == TOKEN_OR || expr->op.type == TOKEN_AND) {
-        if (left.type != TYPE_BOOL || right.type != TYPE_BOOL) {
+        if (left.type != ABC_TYPE_BOOL || right.type != ABC_TYPE_BOOL) {
             fprintf(stderr, "expect bool as lhs and rhs in logical expression\n");
             return (struct typecheck_result) {.err = true};
         }
-        return (struct typecheck_result) {.err = false, .type = TYPE_BOOL};
+        return (struct typecheck_result) {.err = false, .type = ABC_TYPE_BOOL};
     }
-    if (left.type != TYPE_INT || right.type != TYPE_INT) {
+    if (left.type != ABC_TYPE_INT || right.type != ABC_TYPE_INT) {
         fprintf(stderr, "expect int as lhs and rhs in numerical/relational expression\n");
         return (struct typecheck_result) {.err = true};
     }
-    enum typecheck_type type = TYPE_BOOL;
-    if (expr->op.type == TOKEN_PLUS || expr->op.type == TOKEN_MINUS || expr->op.type == TOKEN_STAR
-        || expr->op.type == TOKEN_SLASH) {
-        type = TYPE_INT;
+    enum abc_type type = ABC_TYPE_BOOL;
+    if (expr->op.type == TOKEN_PLUS || expr->op.type == TOKEN_MINUS || expr->op.type == TOKEN_STAR ||
+        expr->op.type == TOKEN_SLASH) {
+        type = ABC_TYPE_INT;
     }
     return (struct typecheck_result) {.err = false, .type = type};
 }
@@ -341,17 +357,17 @@ static struct typecheck_result typecheck_unary_expr(struct abc_typechecker *tc, 
         return (struct typecheck_result) {.err = true};
     }
     if (expr->op.type == TOKEN_BANG) {
-        if (rhs.type != TYPE_BOOL) {
+        if (rhs.type != ABC_TYPE_BOOL) {
             fprintf(stderr, "expect bool as rhs of negation\n");
             return (struct typecheck_result) {.err = true};
         }
-        return (struct typecheck_result) {.err = false, .type = TYPE_BOOL};
+        return (struct typecheck_result) {.err = false, .type = ABC_TYPE_BOOL};
     }
-    if (rhs.type != TYPE_INT) {
+    if (rhs.type != ABC_TYPE_INT) {
         fprintf(stderr, "expect int as rhs of unary '-'\n");
         return (struct typecheck_result) {.err = true};
     }
-    return (struct typecheck_result) {.err = false, .type = TYPE_INT};
+    return (struct typecheck_result) {.err = false, .type = ABC_TYPE_INT};
 }
 
 static struct typecheck_result typecheck_call_expr(struct abc_typechecker *tc, struct abc_call_expr *expr) {
@@ -382,7 +398,7 @@ static struct typecheck_result typecheck_call_expr(struct abc_typechecker *tc, s
 
 static struct typecheck_result typecheck_lit_expr(struct abc_typechecker *tc, struct abc_lit_expr *expr) {
     if (expr->lit.tag == ABC_LITERAL_INT) {
-        return (struct typecheck_result) {.err = false, .type = TYPE_INT};
+        return (struct typecheck_result) {.err = false, .type = ABC_TYPE_INT};
     }
     struct type t;
     if (!lookup_type(tc, expr->lit.val.identifier.lexeme, &t)) {

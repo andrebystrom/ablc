@@ -86,7 +86,7 @@ static bool parse_fun_decl(struct abc_parser *parser, struct abc_fun_decl *fun_d
         report_error(parser, type_token.line, "Expected int or void, got %s", type_token.lexeme);
         return false;
     }
-    fun_decl->type = type_token.type == TOKEN_INT_TYPE ? ABC_TYPE_INT : ABC_TYPE_VOID;
+    fun_decl->type = type_token.type == TOKEN_INT_TYPE ? PARSER_TYPE_INT : PARSER_TYPE_VOID;
 
     struct abc_token id_token = abc_lexer_next_token(parser->lexer);
     if (id_token.type != TOKEN_IDENTIFIER) {
@@ -109,7 +109,7 @@ static bool parse_fun_decl(struct abc_parser *parser, struct abc_fun_decl *fun_d
             has_err = true;
             break;
         }
-        param.type = tmp_token.type == TOKEN_INT_TYPE ? ABC_TYPE_INT : ABC_TYPE_VOID;
+        param.type = tmp_token.type == TOKEN_INT_TYPE ? PARSER_TYPE_INT : PARSER_TYPE_VOID;
         tmp_token = abc_lexer_next_token(parser->lexer);
         if (tmp_token.type != TOKEN_IDENTIFIER) {
             report_error(parser, tmp_token.line, "Expected an identifier, got %s", tmp_token.lexeme);
@@ -150,7 +150,7 @@ static bool parse_var_decl(struct abc_parser *parser, struct abc_decl *decl) {
         report_error(parser, type_token.line, "Expected int or void, got %s", type_token.lexeme);
         return false;
     }
-    decl->val.var.type = type_token.type == TOKEN_INT_TYPE ? ABC_TYPE_INT : ABC_TYPE_VOID;
+    decl->val.var.type = type_token.type == TOKEN_INT_TYPE ? PARSER_TYPE_INT : PARSER_TYPE_VOID;
 
     struct abc_token id = abc_lexer_peek(parser->lexer);
     if (id.type != TOKEN_IDENTIFIER) {
@@ -578,7 +578,7 @@ static void print_decl(struct abc_decl *decl, FILE *f, int indent) {
     } else {
         struct abc_var_decl var_decl = decl->val.var;
         print_indent(indent, f);
-        fprintf(f, "%s ", var_decl.type == ABC_TYPE_INT ? "int" : "void");
+        fprintf(f, "%s ", var_decl.type == PARSER_TYPE_INT ? "int" : "void");
         fprintf(f, "%s", var_decl.name.lexeme);
         if (!var_decl.has_init) {
             fprintf(f, ";\n");
@@ -697,11 +697,11 @@ static void print_expr(struct abc_expr *expr, FILE *f) {
 }
 
 static void print_fun_decl(struct abc_fun_decl *fun_decl, FILE *f) {
-    fprintf(f, "%s ", fun_decl->type == ABC_TYPE_INT ? "int" : "void");
+    fprintf(f, "%s ", fun_decl->type == PARSER_TYPE_INT ? "int" : "void");
     fprintf(f, "%s(", fun_decl->name.lexeme);
     for (size_t i = 0; i < fun_decl->params.len; i++) {
         struct abc_param param = ((struct abc_param *)fun_decl->params.data)[i];
-        fprintf(f, "%s ", param.type == ABC_TYPE_INT ? "int" : "void");
+        fprintf(f, "%s ", param.type == PARSER_TYPE_INT ? "int" : "void");
         fprintf(f, "%s", param.token.lexeme);
         if (i < fun_decl->params.len - 1) {
             fprintf(f, ", ");

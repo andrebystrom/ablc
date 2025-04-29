@@ -9,19 +9,20 @@
 #include "data/abc_arr.h"
 #include "abc_lexer.h"
 #include "data/abc_pool.h"
+#include "abc_type.h"
 
 // Forward declarations needed for cyclic references.
 struct abc_expr;
 
 // misc
 
-enum abc_type {
-    ABC_TYPE_VOID,
-    ABC_TYPE_INT
+enum abc_parser_type {
+    PARSER_TYPE_VOID,
+    PARSER_TYPE_INT
 };
 
 struct abc_param {
-    enum abc_type type;
+    enum abc_parser_type type;
     struct abc_token token;
 };
 
@@ -84,6 +85,7 @@ struct abc_assign_expr {
 
 struct abc_expr {
     enum abc_expr_tag tag;
+    enum abc_type type; // set by typechecker
     union {
         struct abc_bin_expr bin_expr;
         struct abc_unary_expr unary_expr;
@@ -166,7 +168,7 @@ enum abc_decl_tag {
 };
 
 struct abc_var_decl {
-    enum abc_type type;
+    enum abc_parser_type type;
     struct abc_token name;
     bool has_init;
     // valid if has_init == true
@@ -189,7 +191,7 @@ struct abc_decl {
 
 // BEGIN ROOT
 struct abc_fun_decl {
-    enum abc_type type;
+    enum abc_parser_type type;
     struct abc_token name;
     // list of abc_param
     struct abc_arr params;
