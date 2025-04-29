@@ -83,7 +83,7 @@ struct ir_expr_cmp {
 
 struct ir_expr_call {
     char *label;
-    struct abc_arr *args; //ir_atom
+    struct abc_arr args; //ir_atom
 };
 
 struct ir_expr_assign {

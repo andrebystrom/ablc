@@ -1,6 +1,7 @@
 #include "ir.h"
 
 #include <assert.h>
+#include <string.h>
 
 static char *fun_label(struct ir_translator *tr, char *fun_name) { return NULL; }
 
@@ -10,11 +11,32 @@ static char *fun_var_label(struct ir_translator *tr) { return NULL; }
 
 static void insert_ir_var_data(struct ir_translator *tr, struct ir_var_data *data) {}
 
-static char *lookup_ir_var(struct ir_translator *tr, char *og_name) { return NULL; }
+static char *lookup_ir_var(struct ir_translator *tr, char *og_name) {
+    for (size_t i = 0; i < tr->ir_vars.len; i++) {
+        struct ir_var_data var_data = ((struct ir_var_data *) tr->ir_vars.data)[tr->ir_vars.len - (i + 1)];
+        if (var_data.marker) {
+            continue;
+        }
+        if (strcmp(og_name, var_data.original_name) == 0) {
+            return var_data.label;
+        }
+    }
+    assert(0);
+}
 
 static void push_ir_var_scope(struct ir_translator *tr) {}
 
 static void pop_ir_var_scope(struct ir_translator *tr) {}
+
+static char *lookup_ir_fun(struct ir_translator *tr, char *og_name) {
+    for (size_t i = 0; i < tr->ir_funs.len; i++) {
+        struct ir_fun_data ir_fun_data = ((struct ir_fun_data *) tr->ir_funs.data)[i];
+        if (strcmp(og_name, ir_fun_data.original_name) == 0) {
+            return ir_fun_data.label;
+        }
+    }
+    assert(0);
+}
 
 void ir_translator_init(struct ir_translator *translator) {
     translator->pool = abc_pool_create();
@@ -36,9 +58,9 @@ static struct ir_fun init_ir_fun(struct ir_translator *tr, struct abc_fun_decl *
     struct ir_fun_data ir_fun_data = {.label = label, .original_name = fun_decl->name.lexeme};
     abc_arr_push(&tr->ir_funs, &ir_fun_data);
 
-    for (int i = 0; i < fun_decl->params.len; i++) {
+    for (size_t i = 0; i < fun_decl->params.len; i++) {
         struct abc_param param = ((struct abc_param *) fun_decl->params.data)[i];
-        struct ir_param ir_param = {.type = (enum abc_param) param.type};
+        struct ir_param ir_param = {.type = (enum abc_type) param.type};
         char *param_label = fun_var_label(tr);
         ir_param.label = param_label;
         abc_arr_push(&fun.args, &ir_param);
@@ -58,7 +80,7 @@ static void ir_translate_decl(struct ir_translator *tr, struct abc_decl *decl);
 static void ir_translate_stmt(struct ir_translator *tr, struct abc_stmt *stmt);
 static void ir_translate_block_stmt(struct ir_translator *tr, struct abc_block_stmt *block);
 struct ir_expr ir_translate_expr(struct ir_translator *translator, struct abc_expr *expr);
-struct ir_atom ir_atomize_expr(struct ir_translator *translator, struct abc_expr *expr);
+struct ir_atom ir_atomize_expr(struct ir_translator *translator, struct ir_expr *expr);
 
 struct ir_program ir_translate(struct ir_translator *translator, struct abc_program *program) {
     for (size_t i = 0; i < program->fun_decls.len; i++) {
@@ -88,7 +110,7 @@ static void ir_translate_decl(struct ir_translator *tr, struct abc_decl *decl) {
         struct ir_expr init = ir_translate_expr(tr, decl->val.var.init);
         ir_decl.init = init;
     }
-    struct ir_stmt stmt = {.tag = IR_STMT_DECL, .val = ir_decl};
+    struct ir_stmt stmt = {.tag = IR_STMT_DECL, .val = {ir_decl}};
     abc_arr_push(&tr->curr_block->stmts, &stmt);
 
     // Update environment
@@ -123,11 +145,7 @@ static void ir_translate_block_stmt(struct ir_translator *tr, struct abc_block_s
     pop_ir_var_scope(tr);
 }
 
-struct ir_expr ir_translate_expr(struct ir_translator *translator, struct abc_expr *expr) {
-    return (struct ir_expr) {0};
-}
-
-enum ir_bin_op to_ir_bin_op(enum abc_token_type type) {
+static enum ir_bin_op to_ir_bin_op(enum abc_token_type type) {
     switch (type) {
         case TOKEN_PLUS:
             return IR_BIN_PLUS;
@@ -137,11 +155,12 @@ enum ir_bin_op to_ir_bin_op(enum abc_token_type type) {
             return IR_BIN_MUL;
         case TOKEN_SLASH:
             return IR_BIN_DIV;
+        default:
+            assert(0);
     }
-    assert(0);
 }
 
-enum ir_bin_op to_ir_cmp(enum abc_token_type type) {
+static enum ir_cmp to_ir_cmp(enum abc_token_type type) {
     switch (type) {
         case TOKEN_EQUALS_EQUALS:
             return IR_CMP_EQ;
@@ -160,58 +179,93 @@ enum ir_bin_op to_ir_cmp(enum abc_token_type type) {
     }
 }
 
-struct ir_atom ir_atomize_expr(struct ir_translator *translator, struct abc_expr *expr) {
+static struct ir_atom ir_translate_and_atomize_expr(struct ir_translator *tr, struct abc_expr *expr) {
+    struct ir_expr ir_expr = ir_translate_expr(tr, expr);
+    return ir_atomize_expr(tr, &ir_expr);
+}
+
+struct ir_expr ir_translate_expr(struct ir_translator *tr, struct abc_expr *expr) {
     // Short-circuiting logic for these is handled in translate_pred.
     // Since the only valid place for these is in if stmts/while stmts (typechecker), we only need to worry about
     // them there. This means that ir_translate_expr will never need to create a new basic block.
     assert(expr->tag != ABC_EXPR_BINARY || expr->val.bin_expr.op.type != TOKEN_AND);
     assert(expr->tag != ABC_EXPR_BINARY || expr->val.bin_expr.op.type != TOKEN_OR);
 
-    // TODO
-    // 1. translate to atomic ir_expr that is heap allocated
-    // 2. create decl for new variable (atom) to equal the atomic ir_expr
-    // 3. insert the decl into the block
-    // 4. return the atom
     struct ir_atom lhs;
     struct ir_atom rhs;
-    struct ir_expr *ir_expr = abc_pool_alloc(translator->pool, sizeof(struct ir_expr), 1);
-    ir_expr->type = expr->type;
+    struct ir_expr ir_expr = {.type = expr->type};
+    struct ir_expr *ir_expr_ptr;
+    struct ir_expr tmp;
+    char *label;
 
     switch (expr->tag) {
         case ABC_EXPR_BINARY:
-            lhs = ir_atomize_expr(translator, expr->val.bin_expr.left);
-            rhs = ir_atomize_expr(translator, expr->val.bin_expr.right);
+            lhs = ir_translate_and_atomize_expr(tr, expr->val.bin_expr.left);
+            rhs = ir_translate_and_atomize_expr(tr, expr->val.bin_expr.right);
             if (expr->val.bin_expr.op.type == TOKEN_PLUS || expr->val.bin_expr.op.type == TOKEN_MINUS ||
                 expr->val.bin_expr.op.type == TOKEN_STAR || expr->val.bin_expr.op.type == TOKEN_SLASH) {
-                ir_expr->tag = IR_EXPR_BIN;
-                ir_expr->val.bin.lhs = lhs;
-                ir_expr->val.bin.rhs = rhs;
-                ir_expr->val.bin.op = to_ir_bin_op(expr->val.bin_expr.op.type);
+                ir_expr.tag = IR_EXPR_BIN;
+                ir_expr.val.bin.lhs = lhs;
+                ir_expr.val.bin.rhs = rhs;
+                ir_expr.val.bin.op = to_ir_bin_op(expr->val.bin_expr.op.type);
             } else {
-                ir_expr->tag = IR_EXPR_CMP;
-                ir_expr->val.cmp.lhs = lhs;
-                ir_expr->val.cmp.rhs = rhs;
-                ir_expr->val.cmp.cmp = to_ir_cmp(expr->val.bin_expr.op.type);
+                ir_expr.tag = IR_EXPR_CMP;
+                ir_expr.val.cmp.lhs = lhs;
+                ir_expr.val.cmp.rhs = rhs;
+                ir_expr.val.cmp.cmp = to_ir_cmp(expr->val.bin_expr.op.type);
             }
             break;
         case ABC_EXPR_UNARY:
-            ir_expr->tag = IR_EXPR_UNARY;
-            ir_expr->val.unary.op = expr->val.unary_expr.op.type == TOKEN_BANG ? IR_UNARY_BANG : IR_UNARY_MINUS;
-            lhs = ir_atomize_expr(translator, expr->val.unary_expr.expr);
-            ir_expr->val.unary.atom = lhs;
+            ir_expr.tag = IR_EXPR_UNARY;
+            ir_expr.val.unary.op = expr->val.unary_expr.op.type == TOKEN_BANG ? IR_UNARY_BANG : IR_UNARY_MINUS;
+            lhs = ir_translate_and_atomize_expr(tr, expr->val.unary_expr.expr);
+            ir_expr.val.unary.atom = lhs;
             break;
         case ABC_EXPR_CALL:
+            ir_expr.tag = IR_EXPR_CALL;
+            abc_arr_init(&ir_expr.val.call.args, sizeof(struct ir_param), tr->pool);
+            for (size_t i = 0; i < expr->val.call_expr.args.len; i++) {
+                struct abc_expr *arg = ((struct abc_expr **) expr->val.call_expr.args.data)[i];
+                struct ir_atom atom = ir_translate_and_atomize_expr(tr, arg);
+                abc_arr_push(&ir_expr.val.call.args, &atom);
+            }
+            label = lookup_ir_fun(tr, expr->val.call_expr.callee.val.identifier.lexeme);
+            ir_expr.val.call.label = label;
             break;
         case ABC_EXPR_LITERAL:
+            ir_expr.tag = IR_EXPR_ATOM;
+            if (expr->val.lit_expr.lit.tag == ABC_LITERAL_INT) {
+                ir_expr.val.atom.atom.tag = IR_ATOM_INT_LIT;
+                ir_expr.val.atom.atom.val.int_lit = expr->val.lit_expr.lit.val.integer;
+            } else {
+                label = lookup_ir_var(tr, expr->val.lit_expr.lit.val.identifier.lexeme);
+                ir_expr.val.atom.atom.tag = IR_ATOM_IDENTIFIER;
+                ir_expr.val.atom.atom.val.label = label;
+            }
             break;
         case ABC_EXPR_ASSIGN:
+            // TODO: lookup var name label
+            ir_expr.tag = IR_EXPR_ASSIGN;
+            tmp = ir_translate_expr(tr, expr->val.assign_expr.expr);
+            ir_expr_ptr = abc_pool_alloc(tr->pool, sizeof(struct ir_expr), 1);
+            *ir_expr_ptr = tmp;
+            ir_expr.val.assign.value = ir_expr_ptr;
+            label = lookup_ir_var(tr, expr->val.assign_expr.lit.val.identifier.lexeme);
+            ir_expr.val.assign.label = label;
             break;
         case ABC_EXPR_GROUPING:
-            break;
+            return ir_translate_expr(tr, expr->val.grouping_expr.expr);
         default:
             assert(0);
     }
 
+    return ir_expr;
+}
 
-    return (struct ir_atom) {0};
+struct ir_atom ir_atomize_expr(struct ir_translator *translator, struct ir_expr *expr) {
+    char *label = fun_var_label(translator);
+    struct ir_stmt_decl ir_decl = {.has_init = true, .type = expr->type, .init = *expr, .label = label};
+    struct ir_stmt stmt = {.tag = IR_STMT_DECL, .val = {ir_decl}};
+    abc_arr_push(&translator->curr_block->stmts, &stmt);
+    return (struct ir_atom) {.tag = IR_ATOM_IDENTIFIER, .val.label = label};
 }
