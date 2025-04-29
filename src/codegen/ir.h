@@ -10,8 +10,6 @@
 
 enum ir_cmp { IR_CMP_EQ, IR_CMP_NE, IR_CMP_LT, IR_CMP_GT, IR_CMP_LE, IR_CMP_GE };
 
-enum ir_logic { IR_LOGIC_AND, IR_LOGIC_OR };
-
 enum ir_bin_op {
     IR_BIN_PLUS,
     IR_BIN_MINUS,
@@ -31,7 +29,7 @@ struct ir_atom {
     union {
         long int_lit;
         char *label;
-    };
+    } val;
 };
 
 enum ir_tail_tag { IR_TAIL_GOTO, IR_TAIL_RET, IR_TAIL_IF };
@@ -60,7 +58,7 @@ struct ir_tail {
     } val;
 };
 
-enum ir_expr_tag { IR_EXPR_BIN, IR_EXPR_UNARY, IR_EXPR_ATOM, IR_EXPR_CMP, IR_EXPR_LOGIC, IR_EXPR_CALL, IR_EXPR_ASSIGN };
+enum ir_expr_tag { IR_EXPR_BIN, IR_EXPR_UNARY, IR_EXPR_ATOM, IR_EXPR_CMP, IR_EXPR_CALL, IR_EXPR_ASSIGN };
 
 struct ir_expr_bin {
     struct ir_atom lhs;
@@ -83,12 +81,6 @@ struct ir_expr_cmp {
     enum ir_cmp cmp;
 };
 
-struct ir_expr_logic {
-    struct ir_atom lhs;
-    struct ir_atom rhs;
-    enum ir_logic op;
-};
-
 struct ir_expr_call {
     char *label;
     struct abc_arr *args; //ir_atom
@@ -107,7 +99,6 @@ struct ir_expr {
         struct ir_expr_unary unary;
         struct ir_expr_atom atom;
         struct ir_expr_cmp cmp;
-        struct ir_expr_logic logic;
         struct ir_expr_call call;
         struct ir_expr_assign assign;
     } val;
@@ -118,8 +109,8 @@ enum ir_stmt_tag { IR_STMT_DECL, IR_STMT_EXPR, IR_STMT_PRINT };
 struct ir_stmt_decl {
     char *label;
     enum abc_type type;
-    bool has_atom;
-    struct ir_atom atom;
+    bool has_init;
+    struct ir_expr init;
 };
 
 struct ir_stmt_expr {
@@ -141,7 +132,7 @@ struct ir_stmt {
 
 struct ir_block {
     char *label;
-    struct abc_arr stms; // ir_stmt
+    struct abc_arr stmts; // ir_stmt
     struct ir_tail tail;
 };
 
@@ -164,22 +155,27 @@ struct ir_program {
 
 // TRANSLATOR
 
+// Used to map variable names to their labels
+// Marker is used to handle scopes during translation
 struct ir_var_data {
     char *original_name;
     char *label;
     bool marker;
 };
 
+// Used to map function names to their labels.
 struct ir_fun_data {
     char *original_name;
     char *label;
-    struct abc_arr var_data;
 };
 
 struct ir_translator {
     bool has_error;
     struct abc_arr ir_funs; // ir_fun_data
+    struct abc_arr ir_vars; // ir_var_data, new for each function
+    // label of the current function we are in
     char *curr_fun_label;
+    // current (active) basic block of the function we are in
     struct ir_block *curr_block;
     struct abc_pool *pool;
 };
