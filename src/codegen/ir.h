@@ -101,6 +101,7 @@ struct ir_expr_assign {
 
 struct ir_expr {
     enum ir_expr_tag tag;
+    enum abc_type type;
     union {
         struct ir_expr_bin bin;
         struct ir_expr_unary unary;
@@ -116,15 +117,25 @@ enum ir_stmt_tag { IR_STMT_DECL, IR_STMT_EXPR, IR_STMT_PRINT };
 
 struct ir_stmt_decl {
     char *label;
+    enum abc_type type;
     bool has_atom;
     struct ir_atom atom;
 };
 
-struct ir_stmt_expr {};
+struct ir_stmt_expr {
+    struct ir_expr expr;
+};
+
+struct ir_stmt_print {
+    struct ir_expr expr;
+};
 
 struct ir_stmt {
     enum ir_stmt_tag tag;
     union {
+        struct ir_stmt_decl decl;
+        struct ir_stmt_expr expr;
+        struct ir_stmt_print print;
     } val;
 };
 
@@ -140,9 +151,11 @@ struct ir_param {
 };
 
 struct ir_fun {
+    int num_var_labels;
     char *label;
-    struct abc_arr *args; // ir_param
-    struct abc_arr *blocks; // ir_block
+    enum abc_type type;
+    struct abc_arr args; // ir_param
+    struct abc_arr blocks; // ir_block
 };
 
 struct ir_program {
@@ -151,21 +164,21 @@ struct ir_program {
 
 // TRANSLATOR
 
-struct ir_fun_data {
-    char *original_name;
-    char *label;
-};
-
-struct ir_param_data {
+struct ir_var_data {
     char *original_name;
     char *label;
     bool marker;
 };
 
+struct ir_fun_data {
+    char *original_name;
+    char *label;
+    struct abc_arr var_data;
+};
+
 struct ir_translator {
     bool has_error;
     struct abc_arr ir_funs; // ir_fun_data
-    struct abc_arr ir_params; // ir_param_data
     char *curr_fun_label;
     struct ir_block *curr_block;
     struct abc_pool *pool;
