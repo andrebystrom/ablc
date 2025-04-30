@@ -3,7 +3,10 @@
 #include <assert.h>
 #include <string.h>
 
-static char *fun_label(struct ir_translator *tr, char *fun_name) { return NULL; }
+static char *fun_label(struct ir_translator *tr, char *fun_name) {
+    (void) tr;
+    return fun_name;
+}
 
 static char *fun_inner_label(struct ir_translator *tr) { return NULL; }
 
@@ -79,6 +82,11 @@ static void ir_translate_fun(struct ir_translator *tr, struct abc_fun_decl *fun_
 static void ir_translate_decl(struct ir_translator *tr, struct abc_decl *decl);
 static void ir_translate_stmt(struct ir_translator *tr, struct abc_stmt *stmt);
 static void ir_translate_block_stmt(struct ir_translator *tr, struct abc_block_stmt *block);
+static void ir_translate_expr_stmt(struct ir_translator *tr, struct abc_expr_stmt *stmt);
+static void ir_translate_if_stmt(struct ir_translator *tr, struct abc_if_stmt *stmt);
+static void ir_translate_while_stmt(struct ir_translator *tr, struct abc_while_stmt *stmt);
+static void ir_translate_print_stmt(struct ir_translator *tr, struct abc_print_stmt *stmt);
+static void ir_translate_return_stmt(struct ir_translator *tr, struct abc_return_stmt *stmt);
 struct ir_expr ir_translate_expr(struct ir_translator *translator, struct abc_expr *expr);
 struct ir_atom ir_atomize_expr(struct ir_translator *translator, struct ir_expr *expr);
 
@@ -112,6 +120,7 @@ static void ir_translate_decl(struct ir_translator *tr, struct abc_decl *decl) {
     }
     struct ir_stmt stmt = {.tag = IR_STMT_DECL, .val = {ir_decl}};
     abc_arr_push(&tr->curr_block->stmts, &stmt);
+    // TODO: Update num vars for ir_fun
 
     // Update environment
     struct ir_var_data ir_var_data = {.label = label, .original_name = decl->val.var.name.lexeme, .marker = false};
@@ -121,19 +130,71 @@ static void ir_translate_decl(struct ir_translator *tr, struct abc_decl *decl) {
 static void ir_translate_stmt(struct ir_translator *tr, struct abc_stmt *stmt) {
     switch (stmt->tag) {
         case ABC_STMT_EXPR:
+            ir_translate_expr_stmt(tr, &stmt->val.expr_stmt);
             break;
         case ABC_STMT_IF:
+            ir_translate_if_stmt(tr, &stmt->val.if_stmt);
             break;
         case ABC_STMT_WHILE:
+            ir_translate_while_stmt(tr, &stmt->val.while_stmt);
             break;
         case ABC_STMT_BLOCK:
             ir_translate_block_stmt(tr, &stmt->val.block_stmt);
             break;
         case ABC_STMT_PRINT:
+            ir_translate_print_stmt(tr, &stmt->val.print_stmt);
             break;
         case ABC_STMT_RETURN:
+            ir_translate_return_stmt(tr, &stmt->val.return_stmt);
             break;
     }
+}
+
+static void translate_pred(struct ir_translator *tr, struct abc_expr *pred, char *success, char *fail) {
+    if (pred->tag == ABC_EXPR_BINARY && pred->val.bin_expr.op.type == TOKEN_AND) {
+
+    } else if (pred->tag == ABC_EXPR_BINARY && pred->val.bin_expr.op.type == TOKEN_OR) {
+
+    } else {
+
+    }
+}
+
+static void ir_translate_if_stmt(struct ir_translator *tr, struct abc_if_stmt *stmt) {
+    // success -> then block, fail = else/continue block
+}
+
+static void ir_translate_while_stmt(struct ir_translator *tr, struct abc_while_stmt *stmt) {
+    // success -> back to while block, fail = continue block
+}
+
+static void ir_translate_expr_stmt(struct ir_translator *tr, struct abc_expr_stmt *stmt) {
+    struct ir_expr expr = ir_translate_expr(tr, stmt->expr);
+    struct ir_stmt ir_stmt = {.tag = IR_STMT_EXPR, .val.expr = {expr}};
+    abc_arr_push(&tr->curr_block->stmts, &ir_stmt);
+}
+
+static void ir_translate_print_stmt(struct ir_translator *tr, struct abc_print_stmt *stmt) {
+    struct ir_expr expr = ir_translate_expr(tr, stmt->expr);
+    struct ir_atom atom = ir_atomize_expr(tr, &expr);
+    struct ir_stmt_print print = {.atom = atom};
+    struct ir_stmt res = {.tag = IR_STMT_PRINT, .val.print = print};
+    abc_arr_push(&tr->curr_block->stmts, &res);
+}
+
+static void ir_translate_return_stmt(struct ir_translator *tr, struct abc_return_stmt *stmt) {
+    // TODO: this needs to be considered. Returns within a scope means that no further stmts for that block
+    // can be executed. Maybe make sure that return is the last statement of a block in the typechecker?
+    // could also be handled by creating an insert_ir_stmt function that checks if return has been
+    // encountered, and if that case simply does not append any more statements.
+    struct ir_tail_ret ret = {.has_atom = stmt->has_expr};
+    struct ir_tail tail = {.tag = IR_TAIL_RET};
+    if (ret.has_atom) {
+        struct ir_expr expr = ir_translate_expr(tr, stmt->expr);
+        struct ir_atom atom = ir_atomize_expr(tr, &expr);
+        ret.atom = atom;
+    }
+    tr->curr_block->tail = tail;
 }
 
 static void ir_translate_block_stmt(struct ir_translator *tr, struct abc_block_stmt *block) {
@@ -244,7 +305,6 @@ struct ir_expr ir_translate_expr(struct ir_translator *tr, struct abc_expr *expr
             }
             break;
         case ABC_EXPR_ASSIGN:
-            // TODO: lookup var name label
             ir_expr.tag = IR_EXPR_ASSIGN;
             tmp = ir_translate_expr(tr, expr->val.assign_expr.expr);
             ir_expr_ptr = abc_pool_alloc(tr->pool, sizeof(struct ir_expr), 1);
@@ -267,5 +327,12 @@ struct ir_atom ir_atomize_expr(struct ir_translator *translator, struct ir_expr 
     struct ir_stmt_decl ir_decl = {.has_init = true, .type = expr->type, .init = *expr, .label = label};
     struct ir_stmt stmt = {.tag = IR_STMT_DECL, .val = {ir_decl}};
     abc_arr_push(&translator->curr_block->stmts, &stmt);
+    // TODO: Update num vars for ir_fun
     return (struct ir_atom) {.tag = IR_ATOM_IDENTIFIER, .val.label = label};
+}
+
+/* PRINTING */
+
+void ir_program_print(struct ir_program *program, FILE *out) {
+
 }

@@ -118,7 +118,7 @@ struct ir_stmt_expr {
 };
 
 struct ir_stmt_print {
-    struct ir_expr expr;
+    struct ir_atom atom;
 };
 
 struct ir_stmt {
@@ -183,5 +183,6 @@ struct ir_translator {
 void ir_translator_init(struct ir_translator *translator);
 void ir_translator_destroy(struct ir_translator *translator);
 struct ir_program ir_translate(struct ir_translator *translator, struct abc_program *program);
+void ir_program_print(struct ir_program *program, FILE *out);
 
 #endif // IR_H
