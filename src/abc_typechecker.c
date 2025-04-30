@@ -264,6 +264,7 @@ static struct typecheck_result typecheck_stmt(struct abc_typechecker *tc, struct
                     fprintf(stderr, "type mismatch for return statement\n");
                     return (struct typecheck_result) {.err = true};
                 }
+                return (struct typecheck_result) {.err = false, .type = res.type};
             } else {
                 if (tc->curr_fun_type != PARSER_TYPE_VOID) {
                     fprintf(stderr, "type mismatch for return statement\n");

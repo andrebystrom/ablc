@@ -1,7 +1,12 @@
+int q() {
+    return 2;
+}
+
 void main() {
-    int b = 15;
-    int a = 2 + b + 3;
-    print(a+2);
+    while(3 > 3) {
+        print(1);
+    }
+
     return;
 }
 

@@ -201,47 +201,100 @@ static void ir_translate_stmt(struct ir_translator *tr, struct abc_stmt *stmt) {
     }
 }
 
-static void translate_pred(struct ir_translator *tr, struct abc_expr *pred, char *success, char *fail) {
+static void ir_translate_pred(struct ir_translator *tr, struct abc_expr *pred, char *success, char *fail) {
     if (pred->tag == ABC_EXPR_BINARY && pred->val.bin_expr.op.type == TOKEN_AND) {
         char *new_success = fun_inner_label(tr);
-        translate_pred(tr, pred->val.bin_expr.left, new_success, fail);
+        ir_translate_pred(tr, pred->val.bin_expr.left, new_success, fail);
+
         struct ir_block new_success_block = {.label = new_success, .has_tail = false};
         abc_arr_init(&new_success_block.stmts, sizeof(struct ir_stmt), tr->pool);
         tr->curr_block = abc_arr_push(&tr->curr_fun->blocks, &new_success_block);
-        translate_pred(tr, pred->val.bin_expr.right, success, fail);
+
+        ir_translate_pred(tr, pred->val.bin_expr.right, success, fail);
     } else if (pred->tag == ABC_EXPR_BINARY && pred->val.bin_expr.op.type == TOKEN_OR) {
         char *new_fail = fun_inner_label(tr);
-        translate_pred(tr, pred->val.bin_expr.left, success, new_fail);
+        ir_translate_pred(tr, pred->val.bin_expr.left, success, new_fail);
         struct ir_block new_fail_block = {.label = new_fail, .has_tail = false};
         abc_arr_init(&new_fail_block.stmts, sizeof(struct ir_stmt), tr->pool);
         tr->curr_block = abc_arr_push(&tr->curr_fun->blocks, &new_fail_block);
-        translate_pred(tr, pred->val.bin_expr.right, success, fail);
+        ir_translate_pred(tr, pred->val.bin_expr.right, success, fail);
     } else {
-        switch (pred->tag) {
-            case ABC_EXPR_BINARY:
-
-                break;
-            case ABC_EXPR_UNARY:
-                break;
-            case ABC_EXPR_CALL:
-                break;
-            case ABC_EXPR_LITERAL:
-                break;
-            case ABC_EXPR_ASSIGN:
-                break;
-            case ABC_EXPR_GROUPING:
-                break;
-        }
+        struct ir_expr expr;
+        struct ir_atom atom;
+        struct ir_tail tail;
+        expr = ir_translate_expr(tr, pred);
+        atom = ir_atomize_expr(tr, &expr);
+        tail.tag = IR_TAIL_IF;
+        tail.val.if_then_else.atom = atom;
+        tail.val.if_then_else.then_label = success;
+        tail.val.if_then_else.else_label = fail;
+        tr->curr_block->has_tail = true;
+        tr->curr_block->tail = tail;
     }
 }
 
 static void ir_translate_if_stmt(struct ir_translator *tr, struct abc_if_stmt *stmt) {
     // success -> then block, fail = else/continue block
     // set tail to continuation in whatever the current block is.
+    char *cont_label = fun_inner_label(tr);
+    char *then_label = fun_inner_label(tr);
+    char *else_label = fun_inner_label(tr);
+
+    // cond
+    ir_translate_pred(tr, stmt->cond, then_label, else_label);
+
+    // then
+    struct ir_block then_block = {.label = then_label, .has_tail = false};
+    abc_arr_init(&then_block.stmts, sizeof(struct ir_stmt), tr->pool);
+    tr->curr_block = abc_arr_push(&tr->curr_fun->blocks, &then_block);
+    ir_translate_stmt(tr, stmt->then_stmt);
+    tr->curr_block->has_tail = true;
+    tr->curr_block->tail = (struct ir_tail) {.tag = IR_TAIL_GOTO, .val.go_to.label = cont_label};
+
+    // else
+    struct ir_block else_block = {.label = else_label, .has_tail = false};
+    abc_arr_init(&else_block.stmts, sizeof(struct ir_stmt), tr->pool);
+    tr->curr_block = abc_arr_push(&tr->curr_fun->blocks, &else_block);
+    if (stmt->has_else) {
+        ir_translate_stmt(tr, stmt->then_stmt);
+    }
+    tr->curr_block->has_tail = true;
+    tr->curr_block->tail = (struct ir_tail) {.tag = IR_TAIL_GOTO, .val.go_to.label = cont_label};
+
+    // setup continuation
+    struct ir_block cont = {.label = cont_label, .has_tail = false};
+    abc_arr_init(&cont.stmts, sizeof(struct ir_stmt), tr->pool);
+    tr->curr_block = abc_arr_push(&tr->curr_fun->blocks, &cont);
 }
 
 static void ir_translate_while_stmt(struct ir_translator *tr, struct abc_while_stmt *stmt) {
     // success -> back to while block, fail = continue block
+    char *loop_start_label = fun_inner_label(tr);
+    char *loop_body_label = fun_inner_label(tr);
+    char *cont_label = fun_inner_label(tr);
+    tr->curr_block->has_tail = true;
+    tr->curr_block->tail.tag = IR_TAIL_GOTO;
+    tr->curr_block->tail.val.go_to.label = loop_start_label;
+
+    // cond
+    struct ir_block loop = {.label = loop_start_label, .has_tail = false};
+    abc_arr_init(&loop.stmts, sizeof(struct ir_stmt), tr->pool);
+    tr->curr_block = abc_arr_push(&tr->curr_fun->blocks, &loop);
+    ir_translate_pred(tr, stmt->cond, loop_body_label, cont_label);
+
+    // body
+    struct ir_block body = {.label = loop_body_label, .has_tail = false};
+    abc_arr_init(&body.stmts, sizeof(struct ir_stmt), tr->pool);
+    tr->curr_block = abc_arr_push(&tr->curr_fun->blocks, &body);
+    ir_translate_stmt(tr, stmt->body);
+    tr->curr_block->has_tail = true;
+    tr->curr_block->tail.tag = IR_TAIL_GOTO;
+    tr->curr_block->tail.val.go_to.label = loop_start_label;
+
+    // cont
+    struct ir_block cont = {.label = cont_label, .has_tail = false};
+    abc_arr_init(&cont.stmts, sizeof(struct ir_stmt), tr->pool);
+    tr->curr_block = abc_arr_push(&tr->curr_fun->blocks, &cont);
 }
 
 static void ir_translate_expr_stmt(struct ir_translator *tr, struct abc_expr_stmt *stmt) {
