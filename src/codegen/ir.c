@@ -8,11 +8,44 @@ static char *fun_label(struct ir_translator *tr, char *fun_name) {
     return fun_name;
 }
 
-static char *fun_inner_label(struct ir_translator *tr) { return NULL; }
+static char *fun_inner_label(struct ir_translator *tr) {
+    static char *curr_fun = NULL;
+    static int counter = 0;
 
-static char *fun_var_label(struct ir_translator *tr) { return NULL; }
+    if (curr_fun == NULL) {
+        curr_fun = tr->curr_fun->label;
+        counter = 0;
+    } else if (strcmp(curr_fun, tr->curr_fun->label) != 0) {
+        counter = 0;
+        curr_fun = tr->curr_fun->label;
+    }
+    counter++;
+    int len = snprintf(NULL, 0, "%s_lab_%d", curr_fun, counter);
+    char *res = abc_pool_alloc(tr->pool, len + 1, 1);
+    snprintf(res, len + 1, "%s_lab_%d", curr_fun, counter);
+    return res;
+}
 
-static void insert_ir_var_data(struct ir_translator *tr, struct ir_var_data *data) {}
+static char *fun_var_label(struct ir_translator *tr) {
+    static char *curr_fun = NULL;
+    static int counter = 0;
+
+    if (curr_fun == NULL) {
+        curr_fun = tr->curr_fun->label;
+        counter = 0;
+    } else if (strcmp(curr_fun, tr->curr_fun->label) != 0) {
+        counter = 0;
+        curr_fun = tr->curr_fun->label;
+    }
+    int len = snprintf(NULL, 0, "%s_var_%d", curr_fun, counter);
+    char *res = abc_pool_alloc(tr->pool, len + 1, 1);
+    snprintf(res, len + 1, "%s_var_%d", curr_fun, counter++);
+    return res;
+}
+
+static void insert_ir_var_data(struct ir_translator *tr, struct ir_var_data *data) {
+    abc_arr_push(&tr->ir_vars, data);
+}
 
 static char *lookup_ir_var(struct ir_translator *tr, char *og_name) {
     for (size_t i = 0; i < tr->ir_vars.len; i++) {
@@ -27,9 +60,21 @@ static char *lookup_ir_var(struct ir_translator *tr, char *og_name) {
     assert(0);
 }
 
-static void push_ir_var_scope(struct ir_translator *tr) {}
+static void push_ir_var_scope(struct ir_translator *tr) {
+    struct ir_var_data data = {.marker = true};
+    abc_arr_push(&tr->ir_vars, &data);
+}
 
-static void pop_ir_var_scope(struct ir_translator *tr) {}
+static void pop_ir_var_scope(struct ir_translator *tr) {
+    for (size_t i = 0; i < tr->ir_vars.len; i++) {
+        struct ir_var_data data = ((struct ir_var_data *) tr->ir_vars.data)[tr->ir_vars.len - (i + 1)];
+        if (data.marker) {
+            tr->ir_vars.len = tr->ir_vars.len - (i + 1);
+            return;
+        }
+    }
+    assert(0);
+}
 
 static char *lookup_ir_fun(struct ir_translator *tr, char *og_name) {
     for (size_t i = 0; i < tr->ir_funs.len; i++) {
@@ -43,7 +88,7 @@ static char *lookup_ir_fun(struct ir_translator *tr, char *og_name) {
 
 void ir_translator_init(struct ir_translator *translator) {
     translator->pool = abc_pool_create();
-    translator->curr_fun_label = NULL;
+    translator->curr_fun = NULL;
     translator->curr_block = NULL;
     translator->has_error = false;
     abc_arr_init(&translator->ir_funs, sizeof(struct ir_fun_data), translator->pool);
@@ -55,23 +100,25 @@ void ir_translator_destroy(struct ir_translator *translator) { abc_pool_destroy(
 static struct ir_fun init_ir_fun(struct ir_translator *tr, struct abc_fun_decl *fun_decl) {
     char *label = fun_label(tr, fun_decl->name.lexeme);
     struct ir_fun fun = {.label = label, .num_var_labels = 0, .type = (enum abc_type) fun_decl->type};
-    tr->curr_fun_label = label;
     abc_arr_init(&fun.args, sizeof(struct ir_param), tr->pool);
     abc_arr_init(&fun.blocks, sizeof(struct ir_block), tr->pool);
     struct ir_fun_data ir_fun_data = {.label = label, .original_name = fun_decl->name.lexeme};
     abc_arr_push(&tr->ir_funs, &ir_fun_data);
 
+    tr->curr_fun = &fun; // hack for fun_var_label to work
     for (size_t i = 0; i < fun_decl->params.len; i++) {
         struct abc_param param = ((struct abc_param *) fun_decl->params.data)[i];
         struct ir_param ir_param = {.type = (enum abc_type) param.type};
         char *param_label = fun_var_label(tr);
         ir_param.label = param_label;
         abc_arr_push(&fun.args, &ir_param);
+
         struct ir_var_data ir_param_data = {.original_name = param.token.lexeme, .label = param_label, .marker = false};
         insert_ir_var_data(tr, &ir_param_data);
     }
 
-    struct ir_block start_block = {.label = fun_inner_label(tr)};
+    struct ir_block start_block = {.label = fun_inner_label(tr), .has_tail = false};
+    tr->curr_fun = NULL;
     abc_arr_init(&start_block.stmts, sizeof(struct ir_stmt), tr->pool);
     tr->curr_block = abc_arr_push(&fun.blocks, &start_block);
 
@@ -91,14 +138,18 @@ struct ir_expr ir_translate_expr(struct ir_translator *translator, struct abc_ex
 struct ir_atom ir_atomize_expr(struct ir_translator *translator, struct ir_expr *expr);
 
 struct ir_program ir_translate(struct ir_translator *translator, struct abc_program *program) {
+    struct ir_program ir_prog;
+    abc_arr_init(&ir_prog.ir_funs, sizeof(struct ir_fun), translator->pool);
     for (size_t i = 0; i < program->fun_decls.len; i++) {
         translator->ir_vars.len = 0; // reset var list
         struct abc_fun_decl fun_decl = ((struct abc_fun_decl *) program->fun_decls.data)[i];
         struct ir_fun fun = init_ir_fun(translator, &fun_decl);
+        translator->curr_fun = &fun;
         ir_translate_fun(translator, &fun_decl, &fun);
-        abc_arr_push(&translator->ir_funs, &fun);
+        abc_arr_push(&ir_prog.ir_funs, &fun);
+        translator->curr_fun = NULL;
     }
-    return (struct ir_program) {.ir_funs = translator->ir_funs};
+    return ir_prog;
 }
 
 static void ir_translate_fun(struct ir_translator *tr, struct abc_fun_decl *fun_decl, struct ir_fun *fun) {
@@ -152,16 +203,41 @@ static void ir_translate_stmt(struct ir_translator *tr, struct abc_stmt *stmt) {
 
 static void translate_pred(struct ir_translator *tr, struct abc_expr *pred, char *success, char *fail) {
     if (pred->tag == ABC_EXPR_BINARY && pred->val.bin_expr.op.type == TOKEN_AND) {
-
+        char *new_success = fun_inner_label(tr);
+        translate_pred(tr, pred->val.bin_expr.left, new_success, fail);
+        struct ir_block new_success_block = {.label = new_success, .has_tail = false};
+        abc_arr_init(&new_success_block.stmts, sizeof(struct ir_stmt), tr->pool);
+        tr->curr_block = abc_arr_push(&tr->curr_fun->blocks, &new_success_block);
+        translate_pred(tr, pred->val.bin_expr.right, success, fail);
     } else if (pred->tag == ABC_EXPR_BINARY && pred->val.bin_expr.op.type == TOKEN_OR) {
-
+        char *new_fail = fun_inner_label(tr);
+        translate_pred(tr, pred->val.bin_expr.left, success, new_fail);
+        struct ir_block new_fail_block = {.label = new_fail, .has_tail = false};
+        abc_arr_init(&new_fail_block.stmts, sizeof(struct ir_stmt), tr->pool);
+        tr->curr_block = abc_arr_push(&tr->curr_fun->blocks, &new_fail_block);
+        translate_pred(tr, pred->val.bin_expr.right, success, fail);
     } else {
+        switch (pred->tag) {
+            case ABC_EXPR_BINARY:
 
+                break;
+            case ABC_EXPR_UNARY:
+                break;
+            case ABC_EXPR_CALL:
+                break;
+            case ABC_EXPR_LITERAL:
+                break;
+            case ABC_EXPR_ASSIGN:
+                break;
+            case ABC_EXPR_GROUPING:
+                break;
+        }
     }
 }
 
 static void ir_translate_if_stmt(struct ir_translator *tr, struct abc_if_stmt *stmt) {
     // success -> then block, fail = else/continue block
+    // set tail to continuation in whatever the current block is.
 }
 
 static void ir_translate_while_stmt(struct ir_translator *tr, struct abc_while_stmt *stmt) {
@@ -195,6 +271,7 @@ static void ir_translate_return_stmt(struct ir_translator *tr, struct abc_return
         ret.atom = atom;
     }
     tr->curr_block->tail = tail;
+    tr->curr_block->has_tail = true;
 }
 
 static void ir_translate_block_stmt(struct ir_translator *tr, struct abc_block_stmt *block) {
@@ -323,6 +400,9 @@ struct ir_expr ir_translate_expr(struct ir_translator *tr, struct abc_expr *expr
 }
 
 struct ir_atom ir_atomize_expr(struct ir_translator *translator, struct ir_expr *expr) {
+    if (expr->tag == IR_EXPR_ATOM) {
+        return expr->val.atom.atom;
+    }
     char *label = fun_var_label(translator);
     struct ir_stmt_decl ir_decl = {.has_init = true, .type = expr->type, .init = *expr, .label = label};
     struct ir_stmt stmt = {.tag = IR_STMT_DECL, .val = {ir_decl}};
@@ -333,6 +413,182 @@ struct ir_atom ir_atomize_expr(struct ir_translator *translator, struct ir_expr 
 
 /* PRINTING */
 
-void ir_program_print(struct ir_program *program, FILE *out) {
+static char *type_to_str(enum abc_type type) {
+    switch (type) {
+        case ABC_TYPE_VOID:
+            return "void";
+        case ABC_TYPE_INT:
+            return "int";
+        case ABC_TYPE_BOOL:
+            return "bool";
+        default:
+            assert(0);
+    }
+}
 
+static char *bin_op_to_str(enum ir_bin_op op) {
+    switch (op) {
+        case IR_BIN_PLUS:
+            return "+";
+        case IR_BIN_MINUS:
+            return "-";
+        case IR_BIN_MUL:
+            return "*";
+        case IR_BIN_DIV:
+            return "/";
+        default:
+            assert(0);
+    }
+}
+
+static char *cmp_to_str(enum ir_cmp op) {
+    switch (op) {
+        case IR_CMP_EQ:
+            return "==";
+        case IR_CMP_NE:
+            return "!=";
+        case IR_CMP_LT:
+            return "<";
+        case IR_CMP_GT:
+            return ">";
+        case IR_CMP_LE:
+            return "<=";
+        case IR_CMP_GE:
+            return ">=";
+        default:
+            assert(0);
+    }
+}
+
+static char *unary_to_str(enum ir_unary_op op) {
+    switch (op) {
+        case IR_UNARY_MINUS:
+            return "-";
+        case IR_UNARY_BANG:
+            return "!";
+        default:
+            assert(0);
+    }
+}
+
+static void ir_program_print_atom(struct ir_atom *atom, FILE *out) {
+    switch (atom->tag) {
+        case IR_ATOM_INT_LIT:
+            fprintf(out, "%ld", atom->val.int_lit);
+            break;
+        case IR_ATOM_IDENTIFIER:
+            fprintf(out, "%s", atom->val.label);
+            break;
+        default:
+            assert(0);
+    }
+}
+
+static void ir_program_print_expr(struct ir_expr *expr, FILE *out) {
+    switch (expr->tag) {
+        case IR_EXPR_BIN:
+            ir_program_print_atom(&expr->val.bin.lhs, out);
+            fprintf(out, " %s ", bin_op_to_str(expr->val.bin.op));
+            ir_program_print_atom(&expr->val.bin.rhs, out);
+            break;
+        case IR_EXPR_UNARY:
+            fprintf(out, "%s", unary_to_str(expr->val.unary.op));
+            ir_program_print_atom(&expr->val.unary.atom, out);
+            break;
+        case IR_EXPR_ATOM:
+            ir_program_print_atom(&expr->val.atom.atom, out);
+            break;
+        case IR_EXPR_CMP:
+            ir_program_print_atom(&expr->val.cmp.lhs, out);
+            fprintf(out, " %s ", cmp_to_str(expr->val.cmp.cmp));
+            ir_program_print_atom(&expr->val.cmp.rhs, out);
+            break;
+        case IR_EXPR_CALL:
+            fprintf(out, "%s(", expr->val.call.label);
+            for (size_t i = 0; i < expr->val.call.args.len; i++) {
+                struct ir_atom arg = ((struct ir_atom *) expr->val.call.args.data)[i];
+                ir_program_print_atom(&arg, out);
+                if (i < expr->val.call.args.len - 1) {
+                    fprintf(out, ", ");
+                }
+            }
+            fprintf(out, ")");
+            break;
+        case IR_EXPR_ASSIGN:
+            fprintf(out, "%s = ", expr->val.assign.label);
+            ir_program_print_expr(expr->val.assign.value, out);
+            break;
+    }
+}
+
+static void ir_program_print_stmt(struct ir_stmt *stmt, FILE *out) {
+    switch (stmt->tag) {
+        case IR_STMT_DECL:
+            fprintf(out, "%s %s", type_to_str(stmt->val.decl.type), stmt->val.decl.label);
+            if (stmt->val.decl.has_init) {
+                fprintf(out, " = ");
+                ir_program_print_expr(&stmt->val.decl.init, out);
+                fprintf(out, "\n");
+            }
+            break;
+        case IR_STMT_EXPR:
+            ir_program_print_expr(&stmt->val.expr.expr, out);
+            fprintf(out, "\n");
+            break;
+        case IR_STMT_PRINT:
+            fprintf(out, "print ");
+            ir_program_print_atom(&stmt->val.print.atom, out);
+            fprintf(out, "\n");
+            break;
+    }
+}
+
+static void ir_program_print_block(struct ir_block *block, FILE *out) {
+    fprintf(out, "%s:\n", block->label);
+    for (size_t i = 0; i < block->stmts.len; i++) {
+        struct ir_stmt stmt = ((struct ir_stmt *)block->stmts.data)[i];
+        ir_program_print_stmt(&stmt, out);
+    }
+    if (!block->has_tail) {
+        return;
+    }
+    switch (block->tail.tag) {
+        case IR_TAIL_GOTO:
+            fprintf(out, "goto %s\n", block->tail.val.go_to.label);
+            break;
+        case IR_TAIL_RET:
+            fprintf(out, "return");
+            if (block->tail.val.ret.has_atom) {
+                ir_program_print_atom(&block->tail.val.ret.atom, out);
+            }
+            fprintf(out, "\n");
+            break;
+        case IR_TAIL_IF:
+            fprintf(out, "if ");
+            ir_program_print_atom(&block->tail.val.if_then_else.atom, out);
+            fprintf(out, " goto %s else goto %s\n",
+                block->tail.val.if_then_else.then_label, block->tail.val.if_then_else.else_label);
+            break;
+    }
+}
+
+void ir_program_print(struct ir_program *program, FILE *out) {
+    for (size_t i = 0; i < program->ir_funs.len; i++) {
+        struct ir_fun fun = ((struct ir_fun *)program->ir_funs.data)[i];
+        fprintf(out, "%s (", fun.label);
+        for (size_t j = 0; j < fun.args.len; j++) {
+            struct ir_param param = ((struct ir_param *)fun.args.data)[j];
+            fprintf(out, "%s %s ", type_to_str(param.type), param.label);
+            if (j < fun.args.len - 1) {
+                fprintf(out, ", ");
+            }
+        }
+        fprintf(out, ") -> %s:\n", type_to_str(fun.type));
+
+        for (size_t j = 0; j < fun.blocks.len; j++) {
+            struct ir_block block = ((struct ir_block *)fun.blocks.data)[j];
+            ir_program_print_block(&block, out);
+        }
+        fprintf(out, "\n");
+    }
 }

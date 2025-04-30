@@ -133,6 +133,7 @@ struct ir_stmt {
 struct ir_block {
     char *label;
     struct abc_arr stmts; // ir_stmt
+    bool has_tail;
     struct ir_tail tail;
 };
 
@@ -173,8 +174,8 @@ struct ir_translator {
     bool has_error;
     struct abc_arr ir_funs; // ir_fun_data
     struct abc_arr ir_vars; // ir_var_data, new for each function
-    // label of the current function we are in
-    char *curr_fun_label;
+    // current function we are in
+    struct ir_fun *curr_fun;
     // current (active) basic block of the function we are in
     struct ir_block *curr_block;
     struct abc_pool *pool;
