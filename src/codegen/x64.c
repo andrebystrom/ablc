@@ -237,6 +237,8 @@ static void x64_program_translate_tail(struct x64_translator *t, struct ir_tail 
             abc_arr_push(&t->curr_block->x64_instrs, &instr);
             break;
         case IR_TAIL_IF:
+            // TODO Reconsider this so it works with both ir_cmp and the bang operator
+            // probably need to use setCC with a byte reg, and movzbq to put it in rax. $al is byte reg of rax.
             instr.tag = X64_INSTR_JMPCC;
             instr.val.jmpcc.code = X64_CC_NE;
             instr.val.jmpcc.label = ir_tail->val.if_then_else.then_label;
@@ -348,6 +350,7 @@ static void ir_program_translate_unary_expr(struct x64_translator *t, struct ir_
     abc_arr_push(&t->curr_block->x64_instrs, &instr);
 
     if (expr->op == IR_UNARY_BANG) {
+        // TODO: check comment for if tail
         instr.tag = X64_INSTR_NOTQ;
         instr.val.not.dest.tag = X64_ARG_REG;
         instr.val.not.dest.val.reg.reg = X64_REG_RAX;
@@ -361,7 +364,32 @@ static void ir_program_translate_unary_expr(struct x64_translator *t, struct ir_
 }
 
 static void ir_program_translate_cmp_expr(struct x64_translator *t, struct ir_expr_cmp *expr) {
-
+    // TODO: check comment for if tail
+    struct x64_arg lhs, rhs;
+    struct x64_instr instr;
+    lhs = x64_program_translate_atom(t, &expr->lhs);
+    rhs = x64_program_translate_atom(t, &expr->rhs);
+    instr.tag = X64_INSTR_MOVQ;
+    instr.val.mov.dst.tag = X64_ARG_REG;
+    instr.val.mov.dst.val.reg.reg = X64_REG_RAX;
+    instr.val.mov.src = lhs;
+    abc_arr_push(&t->curr_block->x64_instrs, &instr);
+    switch (expr->cmp) {
+        case IR_CMP_EQ:
+            instr.tag = X64_INSTR_CMPQ;
+            instr.val.cmp.left = lhs;
+            break;
+        case IR_CMP_NE:
+            break;
+        case IR_CMP_LT:
+            break;
+        case IR_CMP_GT:
+            break;
+        case IR_CMP_LE:
+            break;
+        case IR_CMP_GE:
+            break;
+    }
 }
 
 static void ir_program_translate_call_expr(struct x64_translator *t, struct ir_expr_call *expr) {
