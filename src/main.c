@@ -6,11 +6,13 @@
 #include "abc_parser.h"
 #include "abc_typechecker.h"
 #include "codegen/ir.h"
+#include "codegen/x64.h"
 
 void do_lex(char *file);
 void do_parse(char *file);
 void do_typecheck(char *file);
 void do_ir(char *file);
+void do_x64(char *file);
 
 int main(int argc, char **argv) {
     if (argc < 2) {
@@ -30,6 +32,9 @@ int main(int argc, char **argv) {
     }
     else if (strcmp(argv[1], "ir") == 0) {
         do_ir(argv[2]);
+    }
+    else if (strcmp(argv[1], "x64") == 0) {
+        do_x64(argv[2]);
     }
     return 0;
 }
@@ -122,4 +127,40 @@ void do_ir(char *file) {
     abc_parser_destroy(&parser);
     abc_lexer_destroy(&lexer);
     ir_translator_destroy(&ir_translator);
+}
+
+void do_x64(char *file) {
+    struct abc_lexer lexer;
+    if (!abc_lexer_init(&lexer, file)) {
+        fprintf(stderr, "failed to init lexer\n");
+        exit(EXIT_FAILURE);
+    }
+    struct abc_parser parser;
+    abc_parser_init(&parser, &lexer);
+    struct abc_program program = abc_parser_parse(&parser);
+    if (parser.has_error) {
+        fprintf(stderr, "failed to parse program\n");
+        exit(EXIT_FAILURE);
+    }
+    printf("parsed %lu fun decls\n", program.fun_decls.len);
+    // abc_parser_print(&program, stdout);
+
+    bool tc_res = abc_typechecker_typecheck(&program);
+    printf("typecheck %s\n", tc_res ? "OK" : "FAILED");
+
+    struct ir_translator ir_translator;
+    ir_translator_init(&ir_translator);
+    struct ir_program ir_program = ir_translate(&ir_translator, &program);
+    ir_program_print(&ir_program, stdout);
+
+    struct x64_translator x64_translator;
+    x64_translator_init(&x64_translator);
+    struct x64_program x64_program = x64_translate(&x64_translator, &ir_program);
+    x64_program_print(&x64_program, stdout);
+
+
+    abc_parser_destroy(&parser);
+    abc_lexer_destroy(&lexer);
+    ir_translator_destroy(&ir_translator);
+    x64_translator_destroy(&x64_translator);
 }

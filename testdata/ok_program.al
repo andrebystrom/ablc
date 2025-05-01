@@ -9,7 +9,6 @@ void main() {
     if(y > 0 and y > 1) {
         print(y);
         t(1);
-        main();
     }
     return;
 }
