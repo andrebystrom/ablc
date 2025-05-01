@@ -154,6 +154,29 @@ bool abc_typechecker_typecheck(struct abc_program *program) {
             ok = false;
         }
     }
+
+    // check for valid main
+    bool found = false;
+    for (size_t i = 0; i < program->fun_decls.len; i++) {
+        struct abc_fun_decl fun_decl = ((struct abc_fun_decl *) program->fun_decls.data)[i];
+        if (strcmp(fun_decl.name.lexeme, "main") == 0) {
+            found = true;
+            if (fun_decl.type != PARSER_TYPE_VOID) {
+                fprintf(stderr, "main function must be of type void\n");
+                ok = false;
+            }
+            if (fun_decl.params.len != 0) {
+                fprintf(stderr, "main function must have no parameters\n");
+                ok = false;
+            }
+            break;
+        }
+    }
+    if (!found) {
+        fprintf(stderr, "no main function defined\n");
+        ok = false;
+    }
+
     abc_typechecker_destroy(&tc);
     return ok;
 }
