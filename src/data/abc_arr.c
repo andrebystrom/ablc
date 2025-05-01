@@ -18,7 +18,7 @@ void *abc_arr_push(struct abc_arr *arr, void *data) {
         // Grow
         arr->cap *= 2;
         void *tmp = abc_pool_alloc(arr->pool, arr->elem_size, arr->cap);
-        memcpy(tmp, data, arr->len);
+        memcpy(tmp, arr->data, arr->elem_size * arr->len);
         arr->data = tmp;
     }
     memmove((char *) arr->data + arr->elem_size * arr->len, data, arr->elem_size);
