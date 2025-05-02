@@ -234,6 +234,7 @@ static void x64_program_translate_stmt(struct x64_translator *t, struct ir_stmt 
             instr.val.mov.dst.tag = X64_ARG_REG;
             instr.val.mov.dst.val.reg.reg = X64_REG_RSI;
             abc_arr_push(&t->curr_block->x64_instrs, &instr);
+            // TODO clear al/rax, required for varargs.
             // issue call
             instr.tag = X64_INSTR_CALLQ;
             instr.val.callq.label = "printf";
