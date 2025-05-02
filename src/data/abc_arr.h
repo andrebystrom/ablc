@@ -19,6 +19,10 @@ void abc_arr_init(struct abc_arr *arr, size_t elem_size, struct abc_pool *pool);
 
 void *abc_arr_push(struct abc_arr *arr, void *data);
 
+// insertion functions that inserts a value directly before/after the index 'where' is located at
+void *abc_arr_insert_before_ptr(struct abc_arr *arr, void *where, void *data);
+void *abc_arr_insert_after_ptr(struct abc_arr *arr, void *where, void *data);
+
 /*
  * Migrate the array to use the specified pool.
  */

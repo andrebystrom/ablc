@@ -12,9 +12,10 @@ sources = [
         'src/abc_typechecker.c',
         'src/data/abc_pool.c',
         'src/codegen/ir.c',
-        'src/codegen/x64.c'
+        'src/codegen/x64.c',
+        'src/codegen/x64_regalloc.c'
 ]
 
-ablc = executable('ablc', sources, c_args: '-fsanitize=address,leak,undefined', link_args: '-fsanitize=address,leak,undefined')
-#ablc = executable('ablc', sources)
+#ablc = executable('ablc', sources, c_args: '-fsanitize=address,leak,undefined', link_args: '-fsanitize=address,leak,undefined')
+ablc = executable('ablc', sources)
 test('test', ablc)

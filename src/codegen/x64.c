@@ -1,4 +1,5 @@
 #include "x64.h"
+#include "x64_regalloc.h"
 
 #include <assert.h>
 #include <string.h>
@@ -160,6 +161,86 @@ static void create_epilogue(struct x64_translator *t, char *fun_name) {
     abc_arr_push(&t->curr_block->x64_instrs, &ret);
 }
 
+/* REGISTER ALLOCATION */
+
+static void x64_assign_homes_arg(struct x64_translator *translator, struct x64_regalloc *regalloc,
+    struct x64_arg *arg) {
+    if (arg->tag == X64_ARG_STR) {
+        struct x64_arg *new_arg = x64_regalloc_get_arg(regalloc, arg->val.str.str);
+        assert(new_arg != NULL);
+        *arg = *new_arg;
+    }
+}
+
+static void x64_assign_homes_instr(struct x64_translator *translator, struct x64_regalloc *regalloc,
+    struct x64_instr *instr) {
+    switch (instr->tag) {
+        case X64_INSTR_ADDQ:
+            x64_assign_homes_arg(translator, regalloc, &instr->val.add.dst);
+            x64_assign_homes_arg(translator, regalloc, &instr->val.add.src);
+            break;
+        case X64_INSTR_SUBQ:
+            x64_assign_homes_arg(translator, regalloc, &instr->val.sub.dst);
+            x64_assign_homes_arg(translator, regalloc, &instr->val.sub.dst);
+            break;
+        case X64_INSTR_IMULQ:
+            x64_assign_homes_arg(translator, regalloc, &instr->val.imul.mul);
+            break;
+        case X64_INSTR_IDIVQ:
+            x64_assign_homes_arg(translator, regalloc, &instr->val.idiv.div);
+            break;
+        case X64_INSTR_XORQ:
+            x64_assign_homes_arg(translator, regalloc, &instr->val.xor.dst);
+            x64_assign_homes_arg(translator, regalloc, &instr->val.xor.src);
+            break;
+        case X64_INSTR_MOVQ:
+            x64_assign_homes_arg(translator, regalloc, &instr->val.mov.dst);
+            x64_assign_homes_arg(translator, regalloc, &instr->val.mov.src);
+            break;
+        case X64_INSTR_MOVZBQ:
+            x64_assign_homes_arg(translator, regalloc, &instr->val.movzbq.dst);
+            break;
+        case X64_INSTR_PUSHQ:
+            x64_assign_homes_arg(translator, regalloc, &instr->val.push.src);
+            break;
+        case X64_INSTR_POPQ:
+            x64_assign_homes_arg(translator, regalloc, &instr->val.pop.dest);
+            break;
+        case X64_INSTR_LEAQ:
+            x64_assign_homes_arg(translator, regalloc, &instr->val.leaq.dest);
+            break;
+        case X64_INSTR_NEGQ:
+            x64_assign_homes_arg(translator, regalloc, &instr->val.neg.dest);
+            break;
+        case X64_INSTR_SETCC:
+            break;
+        case X64_INSTR_JMP:
+            break;
+        case X64_INSTR_CMPQ:
+            x64_assign_homes_arg(translator, regalloc, &instr->val.cmp.left);
+            x64_assign_homes_arg(translator, regalloc, &instr->val.cmp.right);
+            break;
+        case X64_INSTR_JMPCC:
+            break;
+        case X64_INSTR_CALLQ:
+            break;
+        case X64_INSTR_RETQ:
+            break;
+        case X64_INSTR_LEAVEQ:
+            break;
+    }
+}
+
+static void x64_assign_homes(struct x64_translator *t, struct x64_regalloc *regalloc) {
+    for (int i = 0; i < t->curr_fun->x64_blocks.len; i++) {
+        struct x64_block *block = (struct x64_block *) t->curr_fun->x64_blocks.data + i;
+        for (int j = 0; j < block->x64_instrs.len; j++) {
+            struct x64_instr *instr = (struct x64_instr *) block->x64_instrs.data + j;
+            x64_assign_homes_instr(t, regalloc, instr);
+        }
+    }
+}
+
 static void x64_program_translate_block(struct x64_translator *t, struct ir_block *ir_block);
 static void x64_program_translate_fun(struct x64_translator *t, struct ir_fun *ir_fun) {
     // prelude
@@ -177,7 +258,17 @@ static void x64_program_translate_fun(struct x64_translator *t, struct ir_fun *i
         x64_program_translate_block(t, ir_block);
     }
 
+    // register allocation
+    struct abc_pool *allocator = abc_pool_create();
+    struct x64_regalloc regalloc = x64_regalloc(t->curr_fun, allocator);
+    x64_assign_homes(t, &regalloc);
+
+    // patch instructions
+
+    // patch prelude
+
     // end
+    // TODO also restore callee saved vars in epilogue
     create_epilogue(t, ir_fun->label);
 }
 
@@ -219,7 +310,7 @@ static void x64_program_translate_stmt(struct x64_translator *t, struct ir_stmt 
             // align
             instr.tag = X64_INSTR_PUSHQ;
             instr.val.push.src.tag = X64_ARG_REG;
-            instr.val.push.src.val.reg.reg = X64_REG_RAX;
+            instr.val.push.src.val.reg.reg = X64_REG_RBP;
             abc_arr_push(&t->curr_block->x64_instrs, &instr);
             // load fmt string
             instr.tag = X64_INSTR_LEAQ;
@@ -234,7 +325,13 @@ static void x64_program_translate_stmt(struct x64_translator *t, struct ir_stmt 
             instr.val.mov.dst.tag = X64_ARG_REG;
             instr.val.mov.dst.val.reg.reg = X64_REG_RSI;
             abc_arr_push(&t->curr_block->x64_instrs, &instr);
-            // TODO clear al/rax, required for varargs.
+            // zero al for varargs
+            instr.tag = X64_INSTR_XORQ;
+            instr.val.xor.src.tag = X64_ARG_REG;
+            instr.val.xor.src.val.reg.reg = X64_REG_RAX;
+            instr.val.xor.dst.tag = X64_ARG_REG;
+            instr.val.xor.dst.val.reg.reg = X64_REG_RAX;
+            abc_arr_push(&t->curr_block->x64_instrs, &instr);
             // issue call
             instr.tag = X64_INSTR_CALLQ;
             instr.val.callq.label = "printf";
@@ -242,7 +339,7 @@ static void x64_program_translate_stmt(struct x64_translator *t, struct ir_stmt 
             // remove alignment
             instr.tag = X64_INSTR_POPQ;
             instr.val.pop.dest.tag = X64_ARG_REG;
-            instr.val.pop.dest.val.reg.reg = X64_REG_RDI;
+            instr.val.pop.dest.val.reg.reg = X64_REG_RBP;
             abc_arr_push(&t->curr_block->x64_instrs, &instr);
             break;
     }
