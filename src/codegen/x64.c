@@ -31,6 +31,8 @@ struct x64_program x64_translate(struct x64_translator *t, struct ir_program *pr
     return result;
 }
 
+/* FUNCTIONS */
+
 static void determine_var_spec(struct x64_translator *t, struct ir_fun *ir_fun) {
     t->var_specs.len = 0;
 
@@ -95,7 +97,38 @@ static void create_prelude(struct x64_translator *t, struct ir_fun *ir_fun) {
 
     abc_arr_push(&t->curr_block->x64_instrs, &push_rbp);
     abc_arr_push(&t->curr_block->x64_instrs, &mov_rsp_rbp);
-    abc_arr_push(&t->curr_block->x64_instrs, &sub_rsp);
+    // TODO: handle this after register allocation instead abc_arr_push(&t->curr_block->x64_instrs, &sub_rsp);
+
+    // TODO: mov all incoming registers/stack params to the parameter names
+    struct x64_instr mov = {.tag = X64_INSTR_MOVQ};
+    for (size_t i = 0; i < ir_fun->args.len; i++) {
+        struct ir_param *arg = ((struct ir_param *) ir_fun->args.data) + i;
+        if (i < 4) {
+            // rdi to rcx
+            mov.val.mov.dst.tag = X64_ARG_STR;
+            mov.val.mov.dst.val.str.str = arg->label;
+            mov.val.mov.src.tag = X64_ARG_REG;
+            mov.val.mov.src.val.reg.reg = X64_REG_RDI - i;
+            abc_arr_push(&t->curr_block->x64_instrs, &mov);
+        } else if (i < 6) {
+            // r8 to r9
+            mov.val.mov.dst.tag = X64_ARG_STR;
+            mov.val.mov.dst.val.str.str = arg->label;
+            mov.val.mov.src.tag = X64_ARG_REG;
+            mov.val.mov.src.val.reg.reg = X64_REG_R8 + (i - 4);
+            abc_arr_push(&t->curr_block->x64_instrs, &mov);
+        }
+        else {
+            int num_spilled = (int) ir_fun->args.len - 6;
+            int offset = X64_STACK_PARAM_OFFSET + (num_spilled - (i - 6 + 1)) * X64_VAR_SIZE;
+            mov.val.mov.dst.tag = X64_ARG_STR;
+            mov.val.mov.dst.val.str.str = arg->label;
+            mov.val.mov.src.tag = X64_ARG_DEREF;
+            mov.val.mov.src.val.deref.offset = offset;
+            mov.val.mov.dst.val.deref.reg = X64_REG_RBP;
+            abc_arr_push(&t->curr_block->x64_instrs, &mov);
+        }
+    }
 }
 
 static char *create_epilogue_label(struct x64_translator *t, char *fun_name) {
@@ -147,6 +180,8 @@ static void x64_program_translate_fun(struct x64_translator *t, struct ir_fun *i
     // end
     create_epilogue(t, ir_fun->label);
 }
+
+/* STATEMENT TRANSLATION */
 
 static void x64_program_translate_stmt(struct x64_translator *t, struct ir_stmt *ir_stmt);
 static void x64_program_translate_tail(struct x64_translator *t, struct ir_tail *ir_tail);
@@ -217,7 +252,6 @@ static void x64_program_translate_tail(struct x64_translator *t, struct ir_tail 
     struct x64_arg arg;
     switch (ir_tail->tag) {
         case IR_TAIL_GOTO:
-            printf("GOTO: %s\n", ir_tail->val.go_to.label);
             instr.tag = X64_INSTR_JMP;
             instr.val.jmp.label = ir_tail->val.go_to.label;
             abc_arr_push(&t->curr_block->x64_instrs, &instr);
@@ -233,20 +267,21 @@ static void x64_program_translate_tail(struct x64_translator *t, struct ir_tail 
             }
             instr.tag = X64_INSTR_JMP;
             instr.val.jmp.label = create_epilogue_label(t, t->curr_fun->label);
-            printf("ret: %s\n", instr.val.jmp.label);
             abc_arr_push(&t->curr_block->x64_instrs, &instr);
             break;
         case IR_TAIL_IF:
-            // TODO Reconsider this so it works with both ir_cmp and the bang operator
-            // probably need to use setCC with a byte reg, and movzbq to put it in rax. $al is byte reg of rax.
+            arg = x64_program_translate_atom(t, &ir_tail->val.if_then_else.atom);
+            instr.tag = X64_INSTR_CMPQ;
+            instr.val.cmp.left.tag = X64_ARG_IMM;
+            instr.val.cmp.left.val.imm.imm = 1;
+            instr.val.cmp.right = arg;
+            abc_arr_push(&t->curr_block->x64_instrs, &instr);
             instr.tag = X64_INSTR_JMPCC;
-            instr.val.jmpcc.code = X64_CC_NE;
+            instr.val.jmpcc.code = X64_CC_E;
             instr.val.jmpcc.label = ir_tail->val.if_then_else.then_label;
-            printf("jmpcc: %s\n", ir_tail->val.if_then_else.then_label);
             abc_arr_push(&t->curr_block->x64_instrs, &instr);
             instr.tag = X64_INSTR_JMP;
             instr.val.jmp.label = ir_tail->val.if_then_else.else_label;
-            printf("jmpcc else : %s\n", ir_tail->val.if_then_else.else_label);
             abc_arr_push(&t->curr_block->x64_instrs, &instr);
             break;
         default:
@@ -254,20 +289,22 @@ static void x64_program_translate_tail(struct x64_translator *t, struct ir_tail 
     }
 }
 
-static void ir_program_translate_bin_expr(struct x64_translator *t, struct ir_expr_bin *expr);
-static void ir_program_translate_unary_expr(struct x64_translator *t, struct ir_expr_unary *expr);
-static void ir_program_translate_cmp_expr(struct x64_translator *t, struct ir_expr_cmp *expr);
-static void ir_program_translate_call_expr(struct x64_translator *t, struct ir_expr_call *expr);
+/* EXPRESSION TRANSLATION, result of expressions always stored in $rax */
+
+static void x64_program_translate_bin_expr(struct x64_translator *t, struct ir_expr_bin *expr);
+static void x64_program_translate_unary_expr(struct x64_translator *t, struct ir_expr_unary *expr);
+static void x64_program_translate_cmp_expr(struct x64_translator *t, struct ir_expr_cmp *expr);
+static void x64_program_translate_call_expr(struct x64_translator *t, struct ir_expr_call *expr);
 
 static void x64_program_translate_expr(struct x64_translator *t, struct ir_expr *expr) {
     struct x64_instr instr;
     struct x64_arg lhs;
     switch (expr->tag) {
         case IR_EXPR_BIN:
-            ir_program_translate_bin_expr(t, &expr->val.bin);
+            x64_program_translate_bin_expr(t, &expr->val.bin);
             break;
         case IR_EXPR_UNARY:
-            ir_program_translate_unary_expr(t, &expr->val.unary);
+            x64_program_translate_unary_expr(t, &expr->val.unary);
             break;
         case IR_EXPR_ATOM:
             lhs = x64_program_translate_atom(t, &expr->val.unary.atom);
@@ -278,10 +315,10 @@ static void x64_program_translate_expr(struct x64_translator *t, struct ir_expr 
             abc_arr_push(&t->curr_block->x64_instrs, &instr);
             break;
         case IR_EXPR_CMP:
-            ir_program_translate_cmp_expr(t, &expr->val.cmp);
+            x64_program_translate_cmp_expr(t, &expr->val.cmp);
             break;
         case IR_EXPR_CALL:
-            ir_program_translate_call_expr(t, &expr->val.call);
+            x64_program_translate_call_expr(t, &expr->val.call);
             break;
         case IR_EXPR_ASSIGN:
             x64_program_translate_expr(t, expr->val.assign.value);
@@ -295,7 +332,7 @@ static void x64_program_translate_expr(struct x64_translator *t, struct ir_expr 
     }
 }
 
-static void ir_program_translate_bin_expr(struct x64_translator *t, struct ir_expr_bin *expr) {
+static void x64_program_translate_bin_expr(struct x64_translator *t, struct ir_expr_bin *expr) {
     struct x64_arg lhs, rhs;
     struct x64_instr instr;
     lhs = x64_program_translate_atom(t, &expr->lhs);
@@ -340,7 +377,7 @@ static void ir_program_translate_bin_expr(struct x64_translator *t, struct ir_ex
     abc_arr_push(&t->curr_block->x64_instrs, &instr);
 }
 
-static void ir_program_translate_unary_expr(struct x64_translator *t, struct ir_expr_unary *expr) {
+static void x64_program_translate_unary_expr(struct x64_translator *t, struct ir_expr_unary *expr) {
     struct x64_arg rhs = x64_program_translate_atom(t, &expr->atom);
     struct x64_instr instr;
     instr.tag = X64_INSTR_MOVQ;
@@ -350,10 +387,11 @@ static void ir_program_translate_unary_expr(struct x64_translator *t, struct ir_
     abc_arr_push(&t->curr_block->x64_instrs, &instr);
 
     if (expr->op == IR_UNARY_BANG) {
-        // TODO: check comment for if tail
-        instr.tag = X64_INSTR_NOTQ;
-        instr.val.not.dest.tag = X64_ARG_REG;
-        instr.val.not.dest.val.reg.reg = X64_REG_RAX;
+        instr.tag = X64_INSTR_XORQ;
+        instr.val.xor.src.tag = X64_ARG_IMM;
+        instr.val.xor.src.val.imm.imm = 1;
+        instr.val.xor.dst.tag = X64_ARG_REG;
+        instr.val.xor.dst.val.reg.reg = X64_REG_RAX;
         abc_arr_push(&t->curr_block->x64_instrs, &instr);
     } else {
         instr.tag = X64_INSTR_NEGQ;
@@ -363,8 +401,7 @@ static void ir_program_translate_unary_expr(struct x64_translator *t, struct ir_
     }
 }
 
-static void ir_program_translate_cmp_expr(struct x64_translator *t, struct ir_expr_cmp *expr) {
-    // TODO: check comment for if tail
+static void x64_program_translate_cmp_expr(struct x64_translator *t, struct ir_expr_cmp *expr) {
     struct x64_arg lhs, rhs;
     struct x64_instr instr;
     lhs = x64_program_translate_atom(t, &expr->lhs);
@@ -374,25 +411,40 @@ static void ir_program_translate_cmp_expr(struct x64_translator *t, struct ir_ex
     instr.val.mov.dst.val.reg.reg = X64_REG_RAX;
     instr.val.mov.src = lhs;
     abc_arr_push(&t->curr_block->x64_instrs, &instr);
+    instr.tag = X64_INSTR_CMPQ;
+    instr.val.mov.dst.tag = X64_ARG_REG;
+    instr.val.mov.dst.val.reg.reg = X64_REG_RAX;
+    instr.val.mov.src = rhs;
+    abc_arr_push(&t->curr_block->x64_instrs, &instr);
+    instr.tag = X64_INSTR_SETCC;
     switch (expr->cmp) {
         case IR_CMP_EQ:
-            instr.tag = X64_INSTR_CMPQ;
-            instr.val.cmp.left = lhs;
+            instr.val.setcc.code = X64_CC_E;
             break;
         case IR_CMP_NE:
+            instr.val.setcc.code = X64_CC_NE;
             break;
         case IR_CMP_LT:
+            instr.val.setcc.code = X64_CC_L;
             break;
         case IR_CMP_GT:
+            instr.val.setcc.code = X64_CC_G;
             break;
         case IR_CMP_LE:
+            instr.val.setcc.code = X64_CC_LE;
             break;
         case IR_CMP_GE:
+            instr.val.setcc.code = X64_CC_GE;
             break;
     }
+    abc_arr_push(&t->curr_block->x64_instrs, &instr);
+    instr.tag = X64_INSTR_MOVZBQ;
+    instr.val.movzbq.dst.tag = X64_ARG_REG;
+    instr.val.movzbq.dst.val.reg.reg = X64_REG_RAX;
+    abc_arr_push(&t->curr_block->x64_instrs, &instr);
 }
 
-static void ir_program_translate_call_expr(struct x64_translator *t, struct ir_expr_call *expr) {
+static void x64_program_translate_call_expr(struct x64_translator *t, struct ir_expr_call *expr) {
 
 }
 
@@ -563,10 +615,6 @@ static void x64_program_print_instr(struct x64_instr *instr, FILE *f) {
             fprintf(f, "negq ");
             x64_program_print_arg(&instr->val.neg.dest, f);
             break;
-        case X64_INSTR_NOTQ:
-            fprintf(f, "notq ");
-            x64_program_print_arg(&instr->val.not.dest, f);
-            break;
         case X64_INSTR_JMP:
             fprintf(f, "jmp %s", instr->val.jmp.label);
             break;
@@ -589,6 +637,21 @@ static void x64_program_print_instr(struct x64_instr *instr, FILE *f) {
             break;
         case X64_INSTR_LEAVEQ:
             fprintf(f, "leaveq");
+            break;
+        case X64_INSTR_XORQ:
+            fprintf(f, "xorq ");
+            x64_program_print_arg(&instr->val.xor.src, f);
+            fprintf(f, ", ");
+            x64_program_print_arg(&instr->val.xor.dst, f);
+            break;
+        case X64_INSTR_MOVZBQ:
+            fprintf(f, "movzbq $al, ");
+            x64_program_print_arg(&instr->val.movzbq.dst, f);
+            break;
+        case X64_INSTR_SETCC:
+            fprintf(f, "set");
+            x64_program_print_cc(instr->val.setcc.code, f);
+            fprintf(f, " $al");
             break;
     }
 }

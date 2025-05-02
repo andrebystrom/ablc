@@ -126,15 +126,17 @@ static bool push_type(struct abc_typechecker *tc, struct type *type) {
 static bool lookup_type(struct abc_typechecker *tc, const char *name, struct type *type) {
     bool found = false;
     for (size_t i = 0; i < tc->types.len; i++) {
-        struct type t = ((struct type *) tc->types.data)[i];
-        if (t.marker) {
+        int offset = tc->types.len - (i + 1);
+        struct type *t = (struct type *) tc->types.data + offset;
+        if (t->marker) {
             continue;
         }
-        if (strcmp(t.name, name) == 0) {
+        if (strcmp(t->name, name) == 0) {
             found = true;
-            *type = t;
+            *type = *t;
         }
     }
+
     return found;
 }
 
@@ -193,11 +195,13 @@ static struct typecheck_result typecheck_fun(struct abc_typechecker *tc, struct 
         enum abc_type type = (enum abc_type) param.type;
         struct type t = {.marker = false, .name = param.token.lexeme, .type = type};
         abc_arr_push(&formals.types, &t);
+        push_type(tc, &t);
     }
     if (!push_formals(tc, &formals)) {
         fprintf(stderr, "function %s redefined, skipping typecheck\n", fun->name.lexeme);
         return (struct typecheck_result) {.err = true};
     }
+
     tc->curr_fun_type = fun->type;
     struct typecheck_result result = typecheck_block_stmt(tc, &fun->body);
     return result;

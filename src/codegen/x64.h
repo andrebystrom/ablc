@@ -76,14 +76,16 @@ enum x64_instr_tag {
     X64_INSTR_SUBQ,
     X64_INSTR_IMULQ,
     X64_INSTR_IDIVQ,
+    X64_INSTR_XORQ,
 
     X64_INSTR_MOVQ,
+    X64_INSTR_MOVZBQ,
     X64_INSTR_PUSHQ,
     X64_INSTR_POPQ,
     X64_INSTR_LEAQ,
 
     X64_INSTR_NEGQ, // arithmetic negate
-    X64_INSTR_NOTQ, // logical negate
+    X64_INSTR_SETCC,
     X64_INSTR_JMP,
     X64_INSTR_CMPQ,
     X64_INSTR_JMPCC,
@@ -111,8 +113,18 @@ struct x64_instr_idivq {
     struct x64_arg div;
 };
 
+struct x64_instr_xorq {
+    struct x64_arg src;
+    struct x64_arg dst;
+};
+
 struct x64_instr_movq {
     struct x64_arg src;
+    struct x64_arg dst;
+};
+
+struct x64_instr_movzbq {
+    // src is always $al, see setcc
     struct x64_arg dst;
 };
 
@@ -133,8 +145,9 @@ struct x64_instr_negq {
     struct x64_arg dest;
 };
 
-struct x64_instr_notq {
-    struct x64_arg dest;
+struct x64_instr_setcc {
+    enum x64_cc code;
+    // dest is always $al
 };
 
 struct x64_instr_jmp {
@@ -170,14 +183,16 @@ struct x64_instr {
         struct x64_instr_subq sub;
         struct x64_instr_imulq imul;
         struct x64_instr_idivq idiv;
+        struct x64_instr_xorq xor;
 
         struct x64_instr_movq mov;
+        struct x64_instr_movzbq movzbq;
         struct x64_instr_pushq push;
         struct x64_instr_popq pop;
         struct x64_instr_leaq leaq;
 
         struct x64_instr_negq neg;
-        struct x64_instr_notq not;
+        struct x64_instr_setcc setcc;
         struct x64_instr_jmp jmp;
         struct x64_instr_cmpq cmp;
         struct x64_instr_jmpcc jmpcc;

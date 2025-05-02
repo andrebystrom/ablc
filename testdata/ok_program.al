@@ -1,5 +1,5 @@
 void t(int a) {
-
+    print(a);
 }
 
 void main() {
