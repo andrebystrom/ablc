@@ -6,7 +6,7 @@
 #include "ir.h"
 
 #define X64_VAR_SIZE 8
-#define X64_STACK_PARAM_OFFSET 24
+#define X64_STACK_PARAM_OFFSET 16
 #define X64_FORMAT_STR_LABEL "format_string"
 
 enum x64_reg {

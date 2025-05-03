@@ -252,18 +252,23 @@ static void ir_translate_if_stmt(struct ir_translator *tr, struct abc_if_stmt *s
     abc_arr_init(&then_block.stmts, sizeof(struct ir_stmt), tr->pool);
     tr->curr_block = abc_arr_push(&tr->curr_fun->blocks, &then_block);
     ir_translate_stmt(tr, stmt->then_stmt);
-    tr->curr_block->has_tail = true;
-    tr->curr_block->tail = (struct ir_tail) {.tag = IR_TAIL_GOTO, .val.go_to.label = cont_label};
+    if (!tr->curr_block->has_tail) {
+        // guard against returns
+        tr->curr_block->has_tail = true;
+        tr->curr_block->tail = (struct ir_tail) {.tag = IR_TAIL_GOTO, .val.go_to.label = cont_label};
+    }
 
     // else
     struct ir_block else_block = {.label = else_label, .has_tail = false};
     abc_arr_init(&else_block.stmts, sizeof(struct ir_stmt), tr->pool);
     tr->curr_block = abc_arr_push(&tr->curr_fun->blocks, &else_block);
     if (stmt->has_else) {
-        ir_translate_stmt(tr, stmt->then_stmt);
+        ir_translate_stmt(tr, stmt->else_stmt);
     }
-    tr->curr_block->has_tail = true;
-    tr->curr_block->tail = (struct ir_tail) {.tag = IR_TAIL_GOTO, .val.go_to.label = cont_label};
+    if (!tr->curr_block->has_tail) {
+        tr->curr_block->has_tail = true;
+        tr->curr_block->tail = (struct ir_tail) {.tag = IR_TAIL_GOTO, .val.go_to.label = cont_label};
+    }
 
     // setup continuation
     struct ir_block cont = {.label = cont_label, .has_tail = false};
@@ -327,6 +332,8 @@ static void ir_translate_return_stmt(struct ir_translator *tr, struct abc_return
         struct ir_atom atom = ir_atomize_expr(tr, &expr);
         ret.atom = atom;
     }
+
+    tail.val.ret = ret;
     tr->curr_block->tail = tail;
     tr->curr_block->has_tail = true;
 }

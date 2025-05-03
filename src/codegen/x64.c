@@ -215,6 +215,31 @@ static void x64_assign_homes(struct x64_translator *t, struct x64_regalloc *rega
     }
 }
 
+/* INSTRUCTION PATCHING */
+
+static void x64_program_patch_instr(struct x64_translator *t, struct x64_block *block, struct x64_instr *instr) {
+    if (instr->tag == X64_INSTR_BIN && instr->val.bin.left.tag == X64_ARG_DEREF &&
+            instr->val.bin.right.tag == X64_ARG_DEREF) {
+        struct x64_instr patch = {.tag = X64_INSTR_BIN, .val.bin.tag = X64_BIN_MOVQ};
+        patch.val.bin.left = instr->val.bin.left;
+        patch.val.bin.right = X64_RAX;
+        abc_arr_insert_before_ptr(&block->x64_instrs, instr, &patch);
+        (instr + 1)->val.bin.left = X64_RAX;
+    }
+}
+
+static void x64_program_patch_fun(struct x64_translator *t, struct x64_fun *fun) {
+    for (int i = 0; i < t->curr_fun->x64_blocks.len; i++) {
+        struct x64_block *block = (struct x64_block *) t->curr_fun->x64_blocks.data + i;
+        size_t len = block->x64_instrs.len;
+        for (int j = 0; j < len; j++) {
+            struct x64_instr *instr = (struct x64_instr *) block->x64_instrs.data + j;
+            x64_program_patch_instr(t, block, instr);
+            len = block->x64_instrs.len;
+        }
+    }
+}
+
 static void x64_program_translate_block(struct x64_translator *t, struct ir_block *ir_block);
 static void x64_program_translate_fun(struct x64_translator *t, struct ir_fun *ir_fun) {
     // init
@@ -237,7 +262,7 @@ static void x64_program_translate_fun(struct x64_translator *t, struct ir_fun *i
     x64_assign_homes(t, &regalloc);
 
     // patch instructions
-    // TODO - check instruction constraints, like single memory access, etc.
+    x64_program_patch_fun(t, t->curr_fun);
 
     // end
     create_prelude(t, ir_fun, &regalloc);
@@ -499,7 +524,7 @@ static void x64_program_translate_cmp_expr(struct x64_translator *t, struct ir_e
 
 static void x64_program_translate_call_expr(struct x64_translator *t, struct ir_expr_call *expr) {
     struct x64_instr instr;
-    bool need_align = expr->args.len <= 6 || (int) expr->args.len - 6 + 1 * X64_VAR_SIZE % 16 != 0;
+    bool need_align = expr->args.len <= 6 || ((int) expr->args.len - 6 + 1) * X64_VAR_SIZE % 16 != 0;
 
     if (need_align) {
         instr.tag = X64_INSTR_STACK, instr.val.stack.tag = X64_STACK_PUSHQ;
@@ -517,7 +542,7 @@ static void x64_program_translate_call_expr(struct x64_translator *t, struct ir_
             instr.val.bin.right = dest;
             abc_arr_push(&t->curr_block->x64_instrs, &instr);
         } else if (i < 6) {
-            struct x64_arg dest = X64_REGS[X64_REG_R8 + i];
+            struct x64_arg dest = X64_REGS[X64_REG_R8 + (i - 4)];
             instr.tag = X64_INSTR_BIN, instr.val.bin.tag = X64_BIN_MOVQ;
             instr.val.bin.left = src;
             instr.val.bin.right = dest;
