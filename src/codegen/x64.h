@@ -71,69 +71,77 @@ struct x64_arg {
     } val;
 };
 
-enum x64_instr_tag {
-    X64_INSTR_ADDQ,
-    X64_INSTR_SUBQ,
-    X64_INSTR_IMULQ,
-    X64_INSTR_IDIVQ,
-    X64_INSTR_XORQ,
+extern const struct x64_arg X64_RAX;
+extern const struct x64_arg X64_RBX;
+extern const struct x64_arg X64_RCX;
+extern const struct x64_arg X64_RDX;
+extern const struct x64_arg X64_RSI;
+extern const struct x64_arg X64_RDI;
+extern const struct x64_arg X64_RSP;
+extern const struct x64_arg X64_RBP;
+extern const struct x64_arg X64_R8;
+extern const struct x64_arg X64_R9;
+extern const struct x64_arg X64_R10;
+extern const struct x64_arg X64_R11;
+extern const struct x64_arg X64_R12;
+extern const struct x64_arg X64_R13;
+extern const struct x64_arg X64_R14;
+extern const struct x64_arg X64_R15;
 
-    X64_INSTR_MOVQ,
+extern const struct x64_arg X64_REGS[];
+
+enum x64_instr_tag {
+    X64_INSTR_BIN,
+    X64_INSTR_FAC,
+    X64_INSTR_STACK,
+    X64_INSTR_NOARG,
     X64_INSTR_MOVZBQ,
-    X64_INSTR_PUSHQ,
-    X64_INSTR_POPQ,
     X64_INSTR_LEAQ,
 
     X64_INSTR_NEGQ, // arithmetic negate
     X64_INSTR_SETCC,
     X64_INSTR_JMP,
-    X64_INSTR_CMPQ,
     X64_INSTR_JMPCC,
-
     X64_INSTR_CALLQ,
-    X64_INSTR_RETQ,
-    X64_INSTR_LEAVEQ,
 };
 
-struct x64_instr_addq {
-    struct x64_arg src;
-    struct x64_arg dst;
+enum x64_bin_instr_tag {
+    X64_BIN_ADDQ,
+    X64_BIN_SUBQ,
+    X64_BIN_XORQ,
+    X64_BIN_MOVQ,
+    X64_BIN_CMPQ
 };
 
-struct x64_instr_subq {
-    struct x64_arg src;
-    struct x64_arg dst;
+struct x64_instr_bin {
+    enum x64_bin_instr_tag tag;
+    struct x64_arg left;
+    struct x64_arg right;
 };
 
-struct x64_instr_imulq {
-    struct x64_arg mul;
+enum x64_fac_instr_tag {
+    X64_FAC_IMULQ,
+    X64_FAC_IDIVQ,
 };
 
-struct x64_instr_idivq {
-    struct x64_arg div;
+struct x64_instr_fac {
+    enum x64_fac_instr_tag tag;
+    struct x64_arg right;
 };
 
-struct x64_instr_xorq {
-    struct x64_arg src;
-    struct x64_arg dst;
+enum x64_stack_instr_tag {
+    X64_STACK_POPQ,
+    X64_STACK_PUSHQ,
 };
 
-struct x64_instr_movq {
-    struct x64_arg src;
-    struct x64_arg dst;
+struct x64_stack_instr {
+    enum x64_stack_instr_tag tag;
+    struct x64_arg arg;
 };
 
 struct x64_instr_movzbq {
     // src is always $al, see setcc
     struct x64_arg dst;
-};
-
-struct x64_instr_pushq {
-    struct x64_arg src;
-};
-
-struct x64_instr_popq {
-    struct x64_arg dest;
 };
 
 struct x64_instr_leaq {
@@ -154,11 +162,6 @@ struct x64_instr_jmp {
     char *label;
 };
 
-struct x64_instr_cmpq {
-    struct x64_arg left;
-    struct x64_arg right;
-};
-
 struct x64_instr_jmpcc {
     char *label;
     enum x64_cc code;
@@ -168,38 +171,31 @@ struct x64_instr_callq {
     char *label;
 };
 
-struct x64_instr_retq {
-    int dummy;
+enum x64_noarg_instr_tag {
+    X64_NOARG_LEAVEQ,
+    X64_NOARG_RETQ
 };
 
-struct x64_instr_leaveq {
-    int dummy;
+struct x64_noarg_instr {
+    enum x64_noarg_instr_tag tag;
 };
 
 struct x64_instr {
     enum x64_instr_tag tag;
     union {
-        struct x64_instr_addq add;
-        struct x64_instr_subq sub;
-        struct x64_instr_imulq imul;
-        struct x64_instr_idivq idiv;
-        struct x64_instr_xorq xor;
-
-        struct x64_instr_movq mov;
+        struct x64_instr_bin bin;
+        struct x64_instr_fac fac;
         struct x64_instr_movzbq movzbq;
-        struct x64_instr_pushq push;
-        struct x64_instr_popq pop;
         struct x64_instr_leaq leaq;
+        struct x64_stack_instr stack;
 
         struct x64_instr_negq neg;
         struct x64_instr_setcc setcc;
         struct x64_instr_jmp jmp;
-        struct x64_instr_cmpq cmp;
         struct x64_instr_jmpcc jmpcc;
 
         struct x64_instr_callq callq;
-        struct x64_instr_retq ret;
-        struct x64_instr_leaveq leave;
+        struct x64_noarg_instr noarg;
     } val;
 };
 
@@ -229,8 +225,6 @@ struct x64_translator {
     struct abc_pool *pool;
     struct x64_fun *curr_fun;
     struct x64_block *curr_block;
-    struct abc_arr var_specs; // x64_var_spec
-    int num_stacked;
 };
 
 void x64_translator_init(struct x64_translator *t);

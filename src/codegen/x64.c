@@ -8,8 +8,6 @@ void x64_translator_init(struct x64_translator *t) {
     t->pool = abc_pool_create();
     t->curr_fun = NULL;
     t->curr_block = NULL;
-    abc_arr_init(&t->var_specs, sizeof(struct x64_var_spec), t->pool);
-    t->num_stacked = 0;
 }
 
 void x64_translator_destroy(struct x64_translator *t) { abc_pool_destroy(t->pool); }
@@ -34,44 +32,42 @@ struct x64_program x64_translate(struct x64_translator *t, struct ir_program *pr
 
 /* FUNCTIONS */
 
-static void determine_var_spec(struct x64_translator *t, struct ir_fun *ir_fun) {
-    t->var_specs.len = 0;
+static void create_init_block(struct x64_translator *t, struct ir_fun *ir_fun) {
+    int len = snprintf(NULL, 0, "%s_init", ir_fun->label);
+    char *label = abc_pool_alloc(t->pool, len + 1, 1);
+    snprintf(label, len + 1, "%s_init", ir_fun->label);
+    struct x64_block block = {.label = label};
+    abc_arr_init(&block.x64_instrs, sizeof(struct x64_instr), t->pool);
+    t->curr_block = abc_arr_push(&t->curr_fun->x64_blocks, &block);
 
-    // start by determining where args are to be placed.
-    // stack params starts before return address
-    // when entering a function, we push rbp to the stack
-    // so the stack pointer points to x, rbp is at x + 8, return address at x + 16, so first param is at x + 24.
-
-    int num_stacked = 0;
     for (size_t i = 0; i < ir_fun->args.len; i++) {
-        struct ir_param param = ((struct ir_param *) ir_fun->args.data)[i];
-        if (i < 6) {
-            // passed as registers, we set these as x, x+8, ...
-            struct x64_var_spec var_spec = {.label = param.label, .offset = -(X64_VAR_SIZE * (int) i)};
-            abc_arr_push(&t->var_specs, &var_spec);
-            num_stacked++;
+        struct ir_param *arg = ((struct ir_param *) ir_fun->args.data) + i;
+        if (i < 4) {
+            // rdi to rcx
+            struct x64_instr mov = {.tag = X64_INSTR_BIN, .val.bin.tag = X64_BIN_MOVQ};
+            mov.val.bin.right.tag = X64_ARG_STR;
+            mov.val.bin.right.val.str.str = arg->label;
+            mov.val.bin.left = X64_REGS[X64_REG_RDI - i];
+            abc_arr_push(&t->curr_block->x64_instrs, &mov);
+        } else if (i < 6) {
+            // r8 to r9
+            struct x64_instr mov = {.tag = X64_INSTR_BIN, .val.bin.tag = X64_BIN_MOVQ};
+            mov.val.bin.right.tag = X64_ARG_STR;
+            mov.val.bin.right.val.str.str = arg->label;
+            mov.val.bin.left = X64_REGS[X64_REG_R8 + (i - 4)];
+            abc_arr_push(&t->curr_block->x64_instrs, &mov);
         } else {
-            // spilled arguments are passed in reverse order on the stack
-            const int num_param = (int) ir_fun->args.len - 6;
-            const int offset = X64_STACK_PARAM_OFFSET + (num_param - ((int) i + 1)) * X64_VAR_SIZE;
-            struct x64_var_spec var_spec = {.label = param.label, .offset = offset};
-            abc_arr_push(&t->var_specs, &var_spec);
+            int num_spilled = (int) ir_fun->args.len - 6;
+            int offset = X64_STACK_PARAM_OFFSET + (num_spilled - (i - 6 + 1)) * X64_VAR_SIZE;
+            struct x64_instr mov = {.tag = X64_INSTR_BIN, .val.bin.tag = X64_BIN_MOVQ};
+            mov.val.bin.right.tag = X64_ARG_STR;
+            mov.val.bin.right.val.str.str = arg->label;
+            mov.val.bin.left.tag = X64_ARG_DEREF;
+            mov.val.bin.left.val.deref.offset = offset;
+            mov.val.bin.left.val.deref.reg = X64_REG_RBP;
+            abc_arr_push(&t->curr_block->x64_instrs, &mov);
         }
     }
-
-    // now we need to place all local variables...
-    for (size_t i = 0; i < ir_fun->blocks.len; i++) {
-        struct ir_block block = ((struct ir_block *) ir_fun->blocks.data)[i];
-        for (size_t j = 0; j < ir_fun->blocks.len; j++) {
-            struct ir_stmt stmt = ((struct ir_stmt *) block.stmts.data)[j];
-            if (stmt.tag == IR_STMT_DECL) {
-                struct ir_stmt_decl decl = stmt.val.decl;
-                struct x64_var_spec var_spec = {.label = decl.label, .offset = -(num_stacked++ * X64_VAR_SIZE)};
-                abc_arr_push(&t->var_specs, &var_spec);
-            }
-        }
-    }
-    t->num_stacked = num_stacked;
 }
 
 static char *create_prelude_label(struct x64_translator *t, char *fun_name) {
@@ -81,54 +77,38 @@ static char *create_prelude_label(struct x64_translator *t, char *fun_name) {
     return prelude;
 }
 
-static void create_prelude(struct x64_translator *t, struct ir_fun *ir_fun) {
+static void create_prelude(struct x64_translator *t, struct ir_fun *ir_fun, struct x64_regalloc *regalloc) {
     char *label = create_prelude_label(t, ir_fun->label);
     struct x64_block block = {.label = label};
     abc_arr_init(&block.x64_instrs, sizeof(struct x64_instr), t->pool);
-    t->curr_block = abc_arr_push(&t->curr_fun->x64_blocks, &block);
+    // insert block at start
+    t->curr_block = abc_arr_insert_before_ptr(&t->curr_fun->x64_blocks, t->curr_fun->x64_blocks.data, &block);
 
-    struct x64_instr push_rbp = {.tag = X64_INSTR_PUSHQ,
-                                 .val.push.src = (struct x64_arg) {.tag = X64_ARG_REG, .val.reg.reg = X64_REG_RBP}};
-    struct x64_instr mov_rsp_rbp = {.tag = X64_INSTR_MOVQ,
-        .val.mov.src = (struct x64_arg) {.tag = X64_ARG_REG, .val.reg.reg = X64_REG_RSP},
-        .val.mov.dst = (struct x64_arg) {.tag = X64_ARG_REG, .val.reg.reg = X64_REG_RBP}};
-    struct x64_instr sub_rsp = {.tag = X64_INSTR_SUBQ,
-        .val.sub.src = (struct x64_arg) {.tag = X64_ARG_IMM, .val.imm.imm = t->num_stacked * X64_VAR_SIZE},
-        .val.sub.dst = (struct x64_arg) {.tag = X64_ARG_REG, .val.reg.reg = X64_REG_RSP}};
+    struct x64_instr instr = {.tag = X64_INSTR_STACK, .val.stack.tag = X64_STACK_PUSHQ, .val.stack.arg = X64_RBP};
+    abc_arr_push(&t->curr_block->x64_instrs, &instr);
+    instr.tag = X64_INSTR_BIN, instr.val.bin.tag = X64_BIN_MOVQ, instr.val.bin.left = X64_RSP,
+    instr.val.bin.right = X64_RBP;
+    abc_arr_push(&t->curr_block->x64_instrs, &instr);
 
-    abc_arr_push(&t->curr_block->x64_instrs, &push_rbp);
-    abc_arr_push(&t->curr_block->x64_instrs, &mov_rsp_rbp);
-    // TODO: handle this after register allocation instead abc_arr_push(&t->curr_block->x64_instrs, &sub_rsp);
+    // space for spilled variables (and alignment)
+    long offset = regalloc->num_spilled * X64_VAR_SIZE;
+    int total = regalloc->num_spilled * X64_VAR_SIZE + regalloc->callee_saved_allocs.len * X64_VAR_SIZE + X64_VAR_SIZE;
+    if (total % 16 != 0) {
+        offset += X64_VAR_SIZE;
+    }
+    instr.tag = X64_INSTR_BIN, instr.val.bin.tag = X64_BIN_SUBQ;
+    instr.val.bin.right = X64_RSP;
+    instr.val.bin.left.tag = X64_ARG_IMM;
+    instr.val.bin.left.val.imm.imm = offset;
+    abc_arr_push(&t->curr_block->x64_instrs, &instr);
 
-    // TODO: mov all incoming registers/stack params to the parameter names
-    struct x64_instr mov = {.tag = X64_INSTR_MOVQ};
-    for (size_t i = 0; i < ir_fun->args.len; i++) {
-        struct ir_param *arg = ((struct ir_param *) ir_fun->args.data) + i;
-        if (i < 4) {
-            // rdi to rcx
-            mov.val.mov.dst.tag = X64_ARG_STR;
-            mov.val.mov.dst.val.str.str = arg->label;
-            mov.val.mov.src.tag = X64_ARG_REG;
-            mov.val.mov.src.val.reg.reg = X64_REG_RDI - i;
-            abc_arr_push(&t->curr_block->x64_instrs, &mov);
-        } else if (i < 6) {
-            // r8 to r9
-            mov.val.mov.dst.tag = X64_ARG_STR;
-            mov.val.mov.dst.val.str.str = arg->label;
-            mov.val.mov.src.tag = X64_ARG_REG;
-            mov.val.mov.src.val.reg.reg = X64_REG_R8 + (i - 4);
-            abc_arr_push(&t->curr_block->x64_instrs, &mov);
-        }
-        else {
-            int num_spilled = (int) ir_fun->args.len - 6;
-            int offset = X64_STACK_PARAM_OFFSET + (num_spilled - (i - 6 + 1)) * X64_VAR_SIZE;
-            mov.val.mov.dst.tag = X64_ARG_STR;
-            mov.val.mov.dst.val.str.str = arg->label;
-            mov.val.mov.src.tag = X64_ARG_DEREF;
-            mov.val.mov.src.val.deref.offset = offset;
-            mov.val.mov.dst.val.deref.reg = X64_REG_RBP;
-            abc_arr_push(&t->curr_block->x64_instrs, &mov);
-        }
+    // Save all callee saved regs
+    for (size_t i = 0; i < regalloc->callee_saved_allocs.len; i++) {
+        struct x64_arg *saved = (struct x64_arg *) regalloc->callee_saved_allocs.data + i;
+        instr.tag = X64_INSTR_STACK;
+        instr.val.stack.tag = X64_STACK_PUSHQ;
+        instr.val.stack.arg = *saved;
+        abc_arr_push(&t->curr_block->x64_instrs, &instr);
     }
 }
 
@@ -149,22 +129,46 @@ static char *create_epilogue_label(struct x64_translator *t, char *fun_name) {
     return epilogue;
 }
 
-static void create_epilogue(struct x64_translator *t, char *fun_name) {
+static void create_epilogue(struct x64_translator *t, char *fun_name, struct x64_regalloc *regalloc) {
     char *label = create_epilogue_label(t, fun_name);
     struct x64_block block = {.label = label};
     abc_arr_init(&block.x64_instrs, sizeof(struct x64_instr), t->pool);
+    // insert at end
     t->curr_block = abc_arr_push(&t->curr_fun->x64_blocks, &block);
 
-    struct x64_instr leave = {.tag = X64_INSTR_LEAVEQ};
-    struct x64_instr ret = {.tag = X64_INSTR_RETQ};
-    abc_arr_push(&t->curr_block->x64_instrs, &leave);
-    abc_arr_push(&t->curr_block->x64_instrs, &ret);
+    // restore callee saved, in reverse order
+    for (size_t i = 0; i < regalloc->callee_saved_allocs.len; i++) {
+        struct x64_arg *saved = regalloc->callee_saved_allocs.data + (regalloc->callee_saved_allocs.len - (i + 1));
+        struct x64_instr instr = {.tag = X64_INSTR_STACK, .val.stack.tag = X64_STACK_POPQ};
+        instr.val.stack.arg = *saved;
+        abc_arr_push(&t->curr_block->x64_instrs, &instr);
+    }
+
+    // space for spilled variables (and alignment)
+    struct x64_instr restore_instr = {.tag = X64_INSTR_STACK, .val.stack.tag = X64_STACK_POPQ};
+    long offset = regalloc->num_spilled * X64_VAR_SIZE;
+    int total = regalloc->num_spilled * X64_VAR_SIZE + regalloc->callee_saved_allocs.len * X64_VAR_SIZE + X64_VAR_SIZE;
+    if (total % 16 != 0) {
+        offset += X64_VAR_SIZE;
+    }
+    restore_instr.tag = X64_INSTR_BIN, restore_instr.val.bin.tag = X64_BIN_ADDQ;
+    restore_instr.val.bin.right = X64_RSP;
+    restore_instr.val.bin.left.tag = X64_ARG_IMM;
+    restore_instr.val.bin.left.val.imm.imm = offset;
+    abc_arr_push(&t->curr_block->x64_instrs, &restore_instr);
+
+    // restore base pointer and return
+    struct x64_instr instr = {.tag = X64_INSTR_STACK, .val.stack.tag = X64_STACK_POPQ};
+    instr.val.stack.arg = X64_RBP;
+    abc_arr_push(&t->curr_block->x64_instrs, &instr);
+    instr.tag = X64_INSTR_NOARG;
+    instr.val.noarg.tag = X64_NOARG_RETQ;
+    abc_arr_push(&t->curr_block->x64_instrs, &instr);
 }
 
 /* REGISTER ALLOCATION */
 
-static void x64_assign_homes_arg(struct x64_translator *translator, struct x64_regalloc *regalloc,
-    struct x64_arg *arg) {
+static void x64_assign_homes_arg(struct x64_translator *t, struct x64_regalloc *regalloc, struct x64_arg *arg) {
     if (arg->tag == X64_ARG_STR) {
         struct x64_arg *new_arg = x64_regalloc_get_arg(regalloc, arg->val.str.str);
         assert(new_arg != NULL);
@@ -172,61 +176,28 @@ static void x64_assign_homes_arg(struct x64_translator *translator, struct x64_r
     }
 }
 
-static void x64_assign_homes_instr(struct x64_translator *translator, struct x64_regalloc *regalloc,
-    struct x64_instr *instr) {
+static void x64_assign_homes_instr(struct x64_translator *t, struct x64_regalloc *regalloc, struct x64_instr *instr) {
     switch (instr->tag) {
-        case X64_INSTR_ADDQ:
-            x64_assign_homes_arg(translator, regalloc, &instr->val.add.dst);
-            x64_assign_homes_arg(translator, regalloc, &instr->val.add.src);
+        case X64_INSTR_BIN:
+            x64_assign_homes_arg(t, regalloc, &instr->val.bin.left);
+            x64_assign_homes_arg(t, regalloc, &instr->val.bin.right);
             break;
-        case X64_INSTR_SUBQ:
-            x64_assign_homes_arg(translator, regalloc, &instr->val.sub.dst);
-            x64_assign_homes_arg(translator, regalloc, &instr->val.sub.dst);
+        case X64_INSTR_FAC:
+            x64_assign_homes_arg(t, regalloc, &instr->val.fac.right);
             break;
-        case X64_INSTR_IMULQ:
-            x64_assign_homes_arg(translator, regalloc, &instr->val.imul.mul);
-            break;
-        case X64_INSTR_IDIVQ:
-            x64_assign_homes_arg(translator, regalloc, &instr->val.idiv.div);
-            break;
-        case X64_INSTR_XORQ:
-            x64_assign_homes_arg(translator, regalloc, &instr->val.xor.dst);
-            x64_assign_homes_arg(translator, regalloc, &instr->val.xor.src);
-            break;
-        case X64_INSTR_MOVQ:
-            x64_assign_homes_arg(translator, regalloc, &instr->val.mov.dst);
-            x64_assign_homes_arg(translator, regalloc, &instr->val.mov.src);
-            break;
-        case X64_INSTR_MOVZBQ:
-            x64_assign_homes_arg(translator, regalloc, &instr->val.movzbq.dst);
-            break;
-        case X64_INSTR_PUSHQ:
-            x64_assign_homes_arg(translator, regalloc, &instr->val.push.src);
-            break;
-        case X64_INSTR_POPQ:
-            x64_assign_homes_arg(translator, regalloc, &instr->val.pop.dest);
-            break;
-        case X64_INSTR_LEAQ:
-            x64_assign_homes_arg(translator, regalloc, &instr->val.leaq.dest);
+        case X64_INSTR_STACK:
+            x64_assign_homes_arg(t, regalloc, &instr->val.stack.arg);
             break;
         case X64_INSTR_NEGQ:
-            x64_assign_homes_arg(translator, regalloc, &instr->val.neg.dest);
+            x64_assign_homes_arg(t, regalloc, &instr->val.neg.dest);
             break;
         case X64_INSTR_SETCC:
-            break;
         case X64_INSTR_JMP:
-            break;
-        case X64_INSTR_CMPQ:
-            x64_assign_homes_arg(translator, regalloc, &instr->val.cmp.left);
-            x64_assign_homes_arg(translator, regalloc, &instr->val.cmp.right);
-            break;
         case X64_INSTR_JMPCC:
-            break;
+        case X64_INSTR_NOARG:
+        case X64_INSTR_MOVZBQ:
+        case X64_INSTR_LEAQ:
         case X64_INSTR_CALLQ:
-            break;
-        case X64_INSTR_RETQ:
-            break;
-        case X64_INSTR_LEAVEQ:
             break;
     }
 }
@@ -243,15 +214,14 @@ static void x64_assign_homes(struct x64_translator *t, struct x64_regalloc *rega
 
 static void x64_program_translate_block(struct x64_translator *t, struct ir_block *ir_block);
 static void x64_program_translate_fun(struct x64_translator *t, struct ir_fun *ir_fun) {
-    // prelude
-    determine_var_spec(t, ir_fun);
+    // init
     t->curr_fun->label = ir_fun->label;
     abc_arr_init(&t->curr_fun->x64_blocks, sizeof(struct x64_block), t->pool);
-    create_prelude(t, ir_fun);
+    create_init_block(t, ir_fun);
 
     // fun translation
     for (size_t i = 0; i < ir_fun->blocks.len; i++) {
-        struct ir_block *ir_block = ((struct ir_block *)ir_fun->blocks.data) + i;
+        struct ir_block *ir_block = ((struct ir_block *) ir_fun->blocks.data) + i;
         struct x64_block block = {.label = ir_block->label};
         abc_arr_init(&block.x64_instrs, sizeof(struct x64_instr), t->pool);
         t->curr_block = abc_arr_push(&t->curr_fun->x64_blocks, &block);
@@ -260,16 +230,15 @@ static void x64_program_translate_fun(struct x64_translator *t, struct ir_fun *i
 
     // register allocation
     struct abc_pool *allocator = abc_pool_create();
-    struct x64_regalloc regalloc = x64_regalloc(t->curr_fun, allocator);
+    struct x64_regalloc regalloc = x64_regalloc(t->curr_fun, allocator, (int) ir_fun->args.len);
     x64_assign_homes(t, &regalloc);
 
     // patch instructions
 
-    // patch prelude
-
     // end
-    // TODO also restore callee saved vars in epilogue
-    create_epilogue(t, ir_fun->label);
+    create_prelude(t, ir_fun, &regalloc);
+    create_epilogue(t, ir_fun->label, &regalloc);
+    abc_pool_destroy(allocator);
 }
 
 /* STATEMENT TRANSLATION */
@@ -295,11 +264,11 @@ static void x64_program_translate_stmt(struct x64_translator *t, struct ir_stmt 
         case IR_STMT_DECL:
             if (ir_stmt->val.decl.has_init) {
                 x64_program_translate_expr(t, &ir_stmt->val.decl.init);
-                instr.tag = X64_INSTR_MOVQ;
-                instr.val.mov.dst.tag = X64_ARG_STR;
-                instr.val.mov.dst.val.str.str = ir_stmt->val.decl.label;
-                instr.val.mov.src.tag = X64_ARG_REG;
-                instr.val.mov.src.val.reg.reg = X64_REG_RAX;
+                instr.tag = X64_INSTR_BIN, instr.val.bin.tag = X64_BIN_MOVQ;
+                instr.val.bin.right.tag = X64_ARG_STR;
+                instr.val.bin.right.val.str.str = ir_stmt->val.decl.label;
+                instr.val.bin.left.tag = X64_ARG_REG;
+                instr.val.bin.left.val.reg.reg = X64_REG_RAX;
                 abc_arr_push(&t->curr_block->x64_instrs, &instr);
             }
             break;
@@ -308,9 +277,8 @@ static void x64_program_translate_stmt(struct x64_translator *t, struct ir_stmt 
             break;
         case IR_STMT_PRINT:
             // align
-            instr.tag = X64_INSTR_PUSHQ;
-            instr.val.push.src.tag = X64_ARG_REG;
-            instr.val.push.src.val.reg.reg = X64_REG_RBP;
+            instr.tag = X64_INSTR_STACK, instr.val.stack.tag = X64_STACK_PUSHQ;
+            instr.val.stack.arg = X64_RBP;
             abc_arr_push(&t->curr_block->x64_instrs, &instr);
             // load fmt string
             instr.tag = X64_INSTR_LEAQ;
@@ -319,27 +287,24 @@ static void x64_program_translate_stmt(struct x64_translator *t, struct ir_stmt 
             instr.val.leaq.dest.val.reg.reg = X64_REG_RDI;
             abc_arr_push(&t->curr_block->x64_instrs, &instr);
             // move atom to rsi
-            instr.tag = X64_INSTR_MOVQ;
+            instr.tag = X64_INSTR_BIN, instr.val.bin.tag = X64_BIN_MOVQ;
             arg = x64_program_translate_atom(t, &ir_stmt->val.print.atom);
-            instr.val.mov.src = arg;
-            instr.val.mov.dst.tag = X64_ARG_REG;
-            instr.val.mov.dst.val.reg.reg = X64_REG_RSI;
+            instr.val.bin.left = arg;
+            instr.val.bin.right = X64_RSI;
             abc_arr_push(&t->curr_block->x64_instrs, &instr);
             // zero al for varargs
-            instr.tag = X64_INSTR_XORQ;
-            instr.val.xor.src.tag = X64_ARG_REG;
-            instr.val.xor.src.val.reg.reg = X64_REG_RAX;
-            instr.val.xor.dst.tag = X64_ARG_REG;
-            instr.val.xor.dst.val.reg.reg = X64_REG_RAX;
+            instr.tag = X64_INSTR_BIN, instr.val.bin.tag = X64_BIN_MOVQ;
+            instr.val.bin.left.tag = X64_ARG_IMM;
+            instr.val.bin.left.val.imm.imm = 0;
+            instr.val.bin.right = X64_RAX;
             abc_arr_push(&t->curr_block->x64_instrs, &instr);
             // issue call
             instr.tag = X64_INSTR_CALLQ;
             instr.val.callq.label = "printf";
             abc_arr_push(&t->curr_block->x64_instrs, &instr);
             // remove alignment
-            instr.tag = X64_INSTR_POPQ;
-            instr.val.pop.dest.tag = X64_ARG_REG;
-            instr.val.pop.dest.val.reg.reg = X64_REG_RBP;
+            instr.tag = X64_INSTR_STACK, instr.val.stack.tag = X64_STACK_POPQ;
+            instr.val.stack.arg = X64_RBP;
             abc_arr_push(&t->curr_block->x64_instrs, &instr);
             break;
     }
@@ -357,10 +322,9 @@ static void x64_program_translate_tail(struct x64_translator *t, struct ir_tail 
         case IR_TAIL_RET:
             if (ir_tail->val.ret.has_atom) {
                 arg = x64_program_translate_atom(t, &ir_tail->val.ret.atom);
-                instr.tag = X64_INSTR_MOVQ;
-                instr.val.mov.dst.tag = X64_ARG_REG;
-                instr.val.mov.dst.val.reg.reg = X64_REG_RAX;
-                instr.val.mov.src = arg;
+                instr.tag = X64_INSTR_BIN, instr.val.bin.tag = X64_BIN_MOVQ;
+                instr.val.bin.right = X64_RAX;
+                instr.val.bin.left = arg;
                 abc_arr_push(&t->curr_block->x64_instrs, &instr);
             }
             instr.tag = X64_INSTR_JMP;
@@ -369,10 +333,9 @@ static void x64_program_translate_tail(struct x64_translator *t, struct ir_tail 
             break;
         case IR_TAIL_IF:
             arg = x64_program_translate_atom(t, &ir_tail->val.if_then_else.atom);
-            instr.tag = X64_INSTR_CMPQ;
-            instr.val.cmp.left.tag = X64_ARG_IMM;
-            instr.val.cmp.left.val.imm.imm = 1;
-            instr.val.cmp.right = arg;
+            instr.tag = X64_INSTR_BIN, instr.val.bin.tag = X64_BIN_CMPQ;
+            instr.val.bin.left.tag = X64_ARG_IMM, instr.val.bin.left.val.imm.imm = 1;
+            instr.val.bin.right = arg;
             abc_arr_push(&t->curr_block->x64_instrs, &instr);
             instr.tag = X64_INSTR_JMPCC;
             instr.val.jmpcc.code = X64_CC_E;
@@ -406,10 +369,9 @@ static void x64_program_translate_expr(struct x64_translator *t, struct ir_expr 
             break;
         case IR_EXPR_ATOM:
             lhs = x64_program_translate_atom(t, &expr->val.unary.atom);
-            instr.tag = X64_INSTR_MOVQ;
-            instr.val.mov.dst.tag = X64_ARG_REG;
-            instr.val.mov.dst.val.reg.reg = X64_REG_RAX;
-            instr.val.mov.src = lhs;
+            instr.tag = X64_INSTR_BIN, instr.val.bin.tag = X64_BIN_MOVQ;
+            instr.val.bin.right = X64_RAX;
+            instr.val.bin.left = lhs;
             abc_arr_push(&t->curr_block->x64_instrs, &instr);
             break;
         case IR_EXPR_CMP:
@@ -420,11 +382,9 @@ static void x64_program_translate_expr(struct x64_translator *t, struct ir_expr 
             break;
         case IR_EXPR_ASSIGN:
             x64_program_translate_expr(t, expr->val.assign.value);
-            instr.tag = X64_INSTR_MOVQ;
-            instr.val.mov.dst.tag = X64_ARG_STR;
-            instr.val.mov.dst.val.str.str = expr->val.assign.label;
-            instr.val.mov.src.tag = X64_ARG_REG;
-            instr.val.mov.src.val.reg.reg = X64_REG_RAX;
+            instr.tag = X64_INSTR_BIN, instr.val.bin.tag = X64_BIN_MOVQ;
+            instr.val.bin.right.tag = X64_ARG_STR, instr.val.bin.right.val.str.str = expr->val.assign.label;
+            instr.val.bin.left = X64_RAX;
             abc_arr_push(&t->curr_block->x64_instrs, &instr);
             break;
     }
@@ -436,60 +396,51 @@ static void x64_program_translate_bin_expr(struct x64_translator *t, struct ir_e
     lhs = x64_program_translate_atom(t, &expr->lhs);
     rhs = x64_program_translate_atom(t, &expr->rhs);
     if (expr->op == IR_BIN_PLUS || expr->op == IR_BIN_MINUS) {
-        instr.tag = X64_INSTR_MOVQ;
-        instr.val.mov.dst.tag = X64_ARG_REG;
-        instr.val.mov.dst.val.reg.reg = X64_REG_RAX;
-        instr.val.mov.src = lhs;
+        instr.tag = X64_INSTR_BIN, instr.val.bin.tag = X64_BIN_MOVQ;
+        instr.val.bin.right = X64_RAX;
+        instr.val.bin.left = lhs;
         abc_arr_push(&t->curr_block->x64_instrs, &instr);
 
-        instr.tag = expr->op == IR_BIN_PLUS ? X64_INSTR_ADDQ : X64_INSTR_SUBQ;
-        if (expr->op == IR_BIN_PLUS) {
-            instr.val.add.src = rhs;
-            instr.val.add.dst.tag = X64_ARG_REG;
-            instr.val.add.dst.val.reg.reg = X64_REG_RAX;
-        } else {
-            instr.val.sub.src = rhs;
-            instr.val.sub.dst.tag = X64_ARG_REG;
-            instr.val.sub.dst.val.reg.reg = X64_REG_RAX;
-        }
+        instr.tag = X64_INSTR_BIN, instr.val.bin.tag = expr->op == IR_BIN_PLUS ? X64_BIN_ADDQ : X64_BIN_SUBQ;
+        instr.val.bin.left = rhs;
+        instr.val.bin.right = X64_RAX;
         abc_arr_push(&t->curr_block->x64_instrs, &instr);
         return;
     }
-    instr.tag = X64_INSTR_MOVQ;
-    instr.val.mov.src.tag = X64_ARG_IMM;
-    instr.val.mov.src.val.imm.imm = 0;
-    instr.val.mov.dst.tag = X64_ARG_REG;
-    instr.val.mov.dst.val.reg.reg = X64_REG_RDX;
+
+    // rdx:rax [* / /] arg
+    instr.tag = X64_INSTR_BIN, instr.val.bin.tag = X64_BIN_MOVQ;
+    instr.val.bin.left.tag = X64_ARG_IMM;
+    instr.val.bin.left.val.imm.imm = 0;
+    instr.val.bin.right = X64_RDX;
     abc_arr_push(&t->curr_block->x64_instrs, &instr);
-    instr.tag = X64_INSTR_MOVQ;
-    instr.val.mov.src = lhs;
-    instr.val.mov.dst.tag = X64_ARG_REG;
-    instr.val.mov.dst.val.reg.reg = X64_REG_RAX;
+
+    instr.tag = X64_INSTR_BIN, instr.val.bin.tag = X64_BIN_MOVQ;
+    instr.val.bin.left = lhs;
+    instr.val.bin.right = X64_RAX;
     abc_arr_push(&t->curr_block->x64_instrs, &instr);
-    instr.tag = expr->op == IR_BIN_MUL ? X64_INSTR_IMULQ : X64_INSTR_IDIVQ;
-    if (expr->op == IR_BIN_MUL) {
-        instr.val.imul.mul = rhs;
-    } else {
-        instr.val.idiv.div = rhs;
-    }
+
+    instr.tag = X64_INSTR_BIN, instr.val.bin.tag = X64_BIN_MOVQ;
+    instr.val.bin.left = rhs;
+    instr.val.bin.right = X64_R15;
+    abc_arr_push(&t->curr_block->x64_instrs, &instr);
+    instr.tag = X64_INSTR_FAC, instr.val.fac.tag = expr->op == IR_BIN_MUL ? X64_FAC_IMULQ : X64_FAC_IDIVQ;
+    instr.val.fac.right = X64_R15;
     abc_arr_push(&t->curr_block->x64_instrs, &instr);
 }
 
 static void x64_program_translate_unary_expr(struct x64_translator *t, struct ir_expr_unary *expr) {
     struct x64_arg rhs = x64_program_translate_atom(t, &expr->atom);
     struct x64_instr instr;
-    instr.tag = X64_INSTR_MOVQ;
-    instr.val.mov.dst.tag = X64_ARG_REG;
-    instr.val.mov.dst.val.reg.reg = X64_REG_RAX;
-    instr.val.mov.src = rhs;
+    instr.tag = X64_INSTR_BIN, instr.val.bin.tag = X64_BIN_MOVQ;
+    instr.val.bin.right = X64_RAX;
+    instr.val.bin.left = rhs;
     abc_arr_push(&t->curr_block->x64_instrs, &instr);
 
     if (expr->op == IR_UNARY_BANG) {
-        instr.tag = X64_INSTR_XORQ;
-        instr.val.xor.src.tag = X64_ARG_IMM;
-        instr.val.xor.src.val.imm.imm = 1;
-        instr.val.xor.dst.tag = X64_ARG_REG;
-        instr.val.xor.dst.val.reg.reg = X64_REG_RAX;
+        instr.tag = X64_INSTR_BIN, instr.val.bin.tag = X64_BIN_XORQ;
+        instr.val.bin.left.tag = X64_ARG_IMM, instr.val.bin.left.val.imm.imm = 1;
+        instr.val.bin.right = X64_RAX;
         abc_arr_push(&t->curr_block->x64_instrs, &instr);
     } else {
         instr.tag = X64_INSTR_NEGQ;
@@ -504,16 +455,17 @@ static void x64_program_translate_cmp_expr(struct x64_translator *t, struct ir_e
     struct x64_instr instr;
     lhs = x64_program_translate_atom(t, &expr->lhs);
     rhs = x64_program_translate_atom(t, &expr->rhs);
-    instr.tag = X64_INSTR_MOVQ;
-    instr.val.mov.dst.tag = X64_ARG_REG;
-    instr.val.mov.dst.val.reg.reg = X64_REG_RAX;
-    instr.val.mov.src = lhs;
+
+    instr.tag = X64_INSTR_BIN, instr.val.bin.tag = X64_BIN_MOVQ;
+    instr.val.bin.right = X64_RAX;
+    instr.val.bin.left = lhs;
     abc_arr_push(&t->curr_block->x64_instrs, &instr);
-    instr.tag = X64_INSTR_CMPQ;
-    instr.val.mov.dst.tag = X64_ARG_REG;
-    instr.val.mov.dst.val.reg.reg = X64_REG_RAX;
-    instr.val.mov.src = rhs;
+
+    instr.tag = X64_INSTR_BIN, instr.val.bin.tag = X64_BIN_CMPQ;
+    instr.val.bin.right = X64_RAX;
+    instr.val.bin.left = rhs;
     abc_arr_push(&t->curr_block->x64_instrs, &instr);
+
     instr.tag = X64_INSTR_SETCC;
     switch (expr->cmp) {
         case IR_CMP_EQ:
@@ -537,13 +489,55 @@ static void x64_program_translate_cmp_expr(struct x64_translator *t, struct ir_e
     }
     abc_arr_push(&t->curr_block->x64_instrs, &instr);
     instr.tag = X64_INSTR_MOVZBQ;
-    instr.val.movzbq.dst.tag = X64_ARG_REG;
-    instr.val.movzbq.dst.val.reg.reg = X64_REG_RAX;
+    instr.val.movzbq.dst = X64_RAX;
     abc_arr_push(&t->curr_block->x64_instrs, &instr);
 }
 
 static void x64_program_translate_call_expr(struct x64_translator *t, struct ir_expr_call *expr) {
+    struct x64_instr instr;
+    bool need_align = expr->args.len <= 6 || (int) expr->args.len - 6 + 1 * X64_VAR_SIZE % 16 != 0;
 
+    if (need_align) {
+        instr.tag = X64_INSTR_STACK, instr.val.stack.tag = X64_STACK_PUSHQ;
+        instr.val.stack.arg = X64_RBP;
+        abc_arr_push(&t->curr_block->x64_instrs, &instr);
+    }
+
+    // pass args
+    for (int i = 0; i < expr->args.len; i++) {
+        struct x64_arg src = x64_program_translate_atom(t, (struct ir_atom *) expr->args.data + i);
+        if (i < 4) {
+            struct x64_arg dest = X64_REGS[X64_REG_RDI - i];
+            instr.tag = X64_INSTR_BIN, instr.val.bin.tag = X64_BIN_MOVQ;
+            instr.val.bin.left = src;
+            instr.val.bin.right = dest;
+            abc_arr_push(&t->curr_block->x64_instrs, &instr);
+        } else if (i < 6) {
+            struct x64_arg dest = X64_REGS[X64_REG_R8 + i];
+            instr.tag = X64_INSTR_BIN, instr.val.bin.tag = X64_BIN_MOVQ;
+            instr.val.bin.left = src;
+            instr.val.bin.right = dest;
+            abc_arr_push(&t->curr_block->x64_instrs, &instr);
+        } else {
+            instr.tag = X64_INSTR_STACK, instr.val.stack.tag = X64_STACK_PUSHQ;
+            instr.val.stack.arg = src;
+            abc_arr_push(&t->curr_block->x64_instrs, &instr);
+        }
+    }
+
+    // call
+    instr.tag = X64_INSTR_CALLQ, instr.val.callq.label = expr->label;
+    abc_arr_push(&t->curr_block->x64_instrs, &instr);
+
+    // restore stack
+    int num_pushed = ((int) expr->args.len - 6 > 0) ? (int) expr->args.len - 6 : 0  + (need_align ? 1 : 0);
+    if (num_pushed > 0) {
+        instr.tag = X64_INSTR_BIN, instr.val.bin.tag = X64_BIN_ADDQ;
+        instr.val.bin.left.tag = X64_ARG_IMM;
+        instr.val.bin.left.val.imm.imm = num_pushed * X64_VAR_SIZE;
+        instr.val.bin.right = X64_RSP;
+        abc_arr_push(&t->curr_block->x64_instrs, &instr);
+    }
 }
 
 static struct x64_arg x64_program_translate_atom(struct x64_translator *t, struct ir_atom *atom) {
@@ -565,8 +559,14 @@ static struct x64_arg x64_program_translate_atom(struct x64_translator *t, struc
 
 /* PRINTING */
 
-static void x64_program_print_indent(FILE *f) {
-    fprintf(f, "    ");
+static void x64_program_print_indent(FILE *f) { fprintf(f, "    "); }
+
+static void x64_program_print_label(FILE *f, char *label) {
+#ifdef __APPLE__
+    fprintf(f, "_%s", label);
+#else
+    fprintf(f, "%s", label);
+#endif
 }
 
 static void x64_program_print_reg(enum x64_reg reg, FILE *f) {
@@ -669,40 +669,49 @@ static void x64_program_print_arg(struct x64_arg *arg, FILE *f) {
 }
 
 static void x64_program_print_instr(struct x64_instr *instr, FILE *f) {
+
     switch (instr->tag) {
-        case X64_INSTR_ADDQ:
-            fprintf(f, "addq ");
-            x64_program_print_arg(&instr->val.add.src, f);
+        case X64_INSTR_BIN:
+            switch (instr->val.bin.tag) {
+                case X64_BIN_ADDQ:
+                    fprintf(f, "addq ");
+                    break;
+                case X64_BIN_SUBQ:
+                    fprintf(f, "subq ");
+                    break;
+                case X64_BIN_XORQ:
+                    fprintf(f, "xorq ");
+                    break;
+                case X64_BIN_MOVQ:
+                    fprintf(f, "movq ");
+                    break;
+                case X64_BIN_CMPQ:
+                    fprintf(f, "cmpq ");
+                    break;
+            }
+            x64_program_print_arg(&instr->val.bin.left, f);
             fprintf(f, ", ");
-            x64_program_print_arg(&instr->val.add.dst, f);
+            x64_program_print_arg(&instr->val.bin.right, f);
             break;
-        case X64_INSTR_SUBQ:
-            fprintf(f, "subq ");
-            x64_program_print_arg(&instr->val.sub.src, f);
-            fprintf(f, ", ");
-            x64_program_print_arg(&instr->val.sub.dst, f);
+        case X64_INSTR_FAC:
+            fprintf(f, "%s ", instr->val.fac.tag == X64_FAC_IMULQ ? "imulq" : "idivq");
+            x64_program_print_arg(&instr->val.fac.right, f);
             break;
-        case X64_INSTR_IMULQ:
-            fprintf(f, "imulq ");
-            x64_program_print_arg(&instr->val.imul.mul, f);
+        case X64_INSTR_STACK:
+            fprintf(f, "%s ", instr->val.stack.tag == X64_STACK_POPQ ? "popq" : "pushq");
+            x64_program_print_arg(&instr->val.stack.arg, f);
             break;
-        case X64_INSTR_IDIVQ:
-            fprintf(f, "idivq ");
-            x64_program_print_arg(&instr->val.idiv.div, f);
+        case X64_INSTR_NOARG:
+            fprintf(f, "%s", instr->val.noarg.tag == X64_NOARG_RETQ ? "retq" : "leaveq");
             break;
-        case X64_INSTR_MOVQ:
-            fprintf(f, "movq ");
-            x64_program_print_arg(&instr->val.mov.src, f);
-            fprintf(f, ", ");
-            x64_program_print_arg(&instr->val.mov.dst, f);
+        case X64_INSTR_MOVZBQ:
+            fprintf(f, "movzbq %%al, ");
+            x64_program_print_arg(&instr->val.movzbq.dst, f);
             break;
-        case X64_INSTR_PUSHQ:
-            fprintf(f, "pushq ");
-            x64_program_print_arg(&instr->val.push.src, f);
-            break;
-        case X64_INSTR_POPQ:
-            fprintf(f, "popq ");
-            x64_program_print_arg(&instr->val.pop.dest, f);
+        case X64_INSTR_SETCC:
+            fprintf(f, "set");
+            x64_program_print_cc(instr->val.setcc.code, f);
+            fprintf(f, " %%al");
             break;
         case X64_INSTR_LEAQ:
             fprintf(f, "leaq ");
@@ -714,48 +723,25 @@ static void x64_program_print_instr(struct x64_instr *instr, FILE *f) {
             x64_program_print_arg(&instr->val.neg.dest, f);
             break;
         case X64_INSTR_JMP:
-            fprintf(f, "jmp %s", instr->val.jmp.label);
-            break;
-        case X64_INSTR_CMPQ:
-            fprintf(f, "cmpq ");
-            x64_program_print_arg(&instr->val.cmp.left, f);
-            fprintf(f, ", ");
-            x64_program_print_arg(&instr->val.cmp.right, f);
+            fprintf(f, "jmp ");
+            x64_program_print_label(f, instr->val.jmp.label);
             break;
         case X64_INSTR_JMPCC:
-            fprintf(f, "jmp");
+            fprintf(f, "j");
             x64_program_print_cc(instr->val.jmpcc.code, f);
-            fprintf(f, " %s", instr->val.jmpcc.label);
+            fprintf(f, " ");
+            x64_program_print_label(f, instr->val.jmpcc.label);
             break;
         case X64_INSTR_CALLQ:
-            fprintf(f, "callq %s", instr->val.callq.label);
-            break;
-        case X64_INSTR_RETQ:
-            fprintf(f, "retq");
-            break;
-        case X64_INSTR_LEAVEQ:
-            fprintf(f, "leaveq");
-            break;
-        case X64_INSTR_XORQ:
-            fprintf(f, "xorq ");
-            x64_program_print_arg(&instr->val.xor.src, f);
-            fprintf(f, ", ");
-            x64_program_print_arg(&instr->val.xor.dst, f);
-            break;
-        case X64_INSTR_MOVZBQ:
-            fprintf(f, "movzbq $al, ");
-            x64_program_print_arg(&instr->val.movzbq.dst, f);
-            break;
-        case X64_INSTR_SETCC:
-            fprintf(f, "set");
-            x64_program_print_cc(instr->val.setcc.code, f);
-            fprintf(f, " $al");
+            fprintf(f, "callq ");
+            x64_program_print_label(f, instr->val.callq.label);
             break;
     }
 }
 
 static void x64_program_print_block(struct x64_block *block, FILE *f) {
-    fprintf(f, "%s:\n", block->label);
+    x64_program_print_label(f, block->label);
+    fprintf(f, ":\n");
     for (size_t i = 0; i < block->x64_instrs.len; i++) {
         x64_program_print_indent(f);
         struct x64_instr *instr = ((struct x64_instr *) block->x64_instrs.data) + i;
@@ -770,10 +756,11 @@ void x64_program_print(struct x64_program *prog, FILE *f) {
     fprintf(f, ".text\n.global main\n\n");
 
     for (size_t i = 0; i < prog->x64_funs.len; i++) {
-        struct x64_fun *fun = ((struct x64_fun *)prog->x64_funs.data) + i;
-        fprintf(f, "%s:\n", fun->label);
+        struct x64_fun *fun = ((struct x64_fun *) prog->x64_funs.data) + i;
+        x64_program_print_label(f, fun->label);
+        fprintf(f, ":\n");
         for (size_t j = 0; j < fun->x64_blocks.len; j++) {
-            struct x64_block *block = ((struct x64_block *)fun->x64_blocks.data) + j;
+            struct x64_block *block = ((struct x64_block *) fun->x64_blocks.data) + j;
             x64_program_print_block(block, f);
         }
         fprintf(f, "\n");

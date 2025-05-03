@@ -1,9 +1,19 @@
+/**
+ * Very basic 'register allocator' that assigns registers to variables or spills them to the stack.
+ * At the moment all variables are assigned stack locations, but the register allocator is free
+ * to be extended to allocate registers according to the API.
+ *
+ * num_params is passed so arguments passed via the stack, that is spilled, can be avoided to occur a move from
+ * the passed stack location to the current functions stack.
+ *
+*/
+
 #include "x64_regalloc.h"
 
 #include <string.h>
 
 static void alloc_reg_for_instr(struct x64_regalloc *regalloc, struct x64_instr *instr);
-struct x64_regalloc x64_regalloc(struct x64_fun *fun, struct abc_pool *allocator) {
+struct x64_regalloc x64_regalloc(struct x64_fun *fun, struct abc_pool *allocator, int num_params) {
     // init
     struct x64_regalloc regalloc;
     abc_arr_init(&regalloc.allocs, sizeof(struct x64_alloc), allocator);
@@ -22,59 +32,28 @@ struct x64_regalloc x64_regalloc(struct x64_fun *fun, struct abc_pool *allocator
 
 static void alloc_reg_for_arg(struct x64_regalloc *regalloc, struct x64_arg *arg);
 static void alloc_reg_for_instr(struct x64_regalloc *regalloc, struct x64_instr *instr) {
+
     switch (instr->tag) {
-        case X64_INSTR_ADDQ:
-            alloc_reg_for_arg(regalloc, &instr->val.add.dst);
-            alloc_reg_for_arg(regalloc, &instr->val.add.src);
+        case X64_INSTR_BIN:
+            alloc_reg_for_arg(regalloc, &instr->val.bin.left);
+            alloc_reg_for_arg(regalloc, &instr->val.bin.right);
             break;
-        case X64_INSTR_SUBQ:
-            alloc_reg_for_arg(regalloc, &instr->val.sub.dst);
-            alloc_reg_for_arg(regalloc, &instr->val.sub.src);
+        case X64_INSTR_FAC:
+            alloc_reg_for_arg(regalloc, &instr->val.fac.right);
             break;
-        case X64_INSTR_IMULQ:
-            alloc_reg_for_arg(regalloc, &instr->val.imul.mul);
-            break;
-        case X64_INSTR_IDIVQ:
-            alloc_reg_for_arg(regalloc, &instr->val.idiv.div);
-            break;
-        case X64_INSTR_XORQ:
-            alloc_reg_for_arg(regalloc, &instr->val.xor.dst);
-            alloc_reg_for_arg(regalloc, &instr->val.xor.src);
-            break;
-        case X64_INSTR_MOVQ:
-            alloc_reg_for_arg(regalloc, &instr->val.mov.dst);
-            alloc_reg_for_arg(regalloc, &instr->val.mov.src);
-            break;
-        case X64_INSTR_MOVZBQ:
-            alloc_reg_for_arg(regalloc, &instr->val.movzbq.dst);
-            break;
-        case X64_INSTR_PUSHQ:
-            alloc_reg_for_arg(regalloc, &instr->val.push.src);
-            break;
-        case X64_INSTR_POPQ:
-            alloc_reg_for_arg(regalloc, &instr->val.pop.dest);
-            break;
-        case X64_INSTR_LEAQ:
-            alloc_reg_for_arg(regalloc, &instr->val.leaq.dest);
+        case X64_INSTR_STACK:
+            alloc_reg_for_arg(regalloc, &instr->val.stack.arg);
             break;
         case X64_INSTR_NEGQ:
             alloc_reg_for_arg(regalloc, &instr->val.neg.dest);
             break;
         case X64_INSTR_SETCC:
-            break;
         case X64_INSTR_JMP:
-            break;
-        case X64_INSTR_CMPQ:
-            alloc_reg_for_arg(regalloc, &instr->val.cmp.left);
-            alloc_reg_for_arg(regalloc, &instr->val.cmp.right);
-            break;
         case X64_INSTR_JMPCC:
-            break;
+        case X64_INSTR_NOARG:
+        case X64_INSTR_MOVZBQ:
+        case X64_INSTR_LEAQ:
         case X64_INSTR_CALLQ:
-            break;
-        case X64_INSTR_RETQ:
-            break;
-        case X64_INSTR_LEAVEQ:
             break;
     }
 }
@@ -83,8 +62,8 @@ static void alloc_reg_for_arg(struct x64_regalloc *regalloc, struct x64_arg *arg
     if (arg->tag != X64_ARG_STR || x64_regalloc_get_arg(regalloc, arg->val.str.str) != NULL) {
         return;
     }
-    int offset = (regalloc->num_spilled++) * X64_VAR_SIZE;
-    struct x64_arg res = {.tag = X64_ARG_DEREF, .val.deref.reg = X64_REG_RBP, .val.deref.offset = offset};
+    int offset = (regalloc->num_spilled++) * X64_VAR_SIZE + X64_VAR_SIZE;
+    struct x64_arg res = {.tag = X64_ARG_DEREF, .val.deref.reg = X64_REG_RBP, .val.deref.offset = -offset};
     struct x64_alloc alloc = {.label = arg->val.str.str, .arg = res};
     abc_arr_push(&regalloc->allocs, &alloc);
 }

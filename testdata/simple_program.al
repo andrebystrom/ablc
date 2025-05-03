@@ -6,7 +6,7 @@ void main() {
     while(3 > 3) {
         print(1);
     }
-
+    t();
     return;
 }
 
