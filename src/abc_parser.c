@@ -474,7 +474,6 @@ static struct abc_expr *parse_expr_lhs(struct abc_parser *parser) {
             return NULL;
     }
     assert(0); // unreachable
-    return NULL;
 }
 
 // lhs is freed on success, on failure it is not.

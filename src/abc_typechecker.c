@@ -1,3 +1,9 @@
+/**
+ * Lots of improvements possible here, for example a map/environment structure for handling scopes,
+ * error messages should be centralized and include line numbers etc.
+ *
+ */
+
 #include "abc_typechecker.h"
 
 #include <assert.h>
@@ -37,21 +43,6 @@ void abc_typechecker_init(struct abc_typechecker *typechecker) {
 }
 
 void abc_typechecker_destroy(struct abc_typechecker *typechecker) { abc_pool_destroy(typechecker->pool); }
-
-static void push_formals_scope(struct abc_typechecker *tc) {
-    struct formals formals = {.marker = true};
-    abc_arr_push(&tc->formals, &formals);
-}
-
-static void pop_formals_scope(struct abc_typechecker *tc) {
-    for (size_t i = 0; i < tc->formals.len; i++) {
-        struct formals formals = ((struct formals *) tc->formals.data)[tc->formals.len - (i + 1)];
-        if (formals.marker) {
-            tc->formals.len = tc->formals.len - (i + 1);
-            break;
-        }
-    }
-}
 
 static bool push_formals(struct abc_typechecker *tc, struct formals *formals) {
     int found_depth = -1;
@@ -126,7 +117,7 @@ static bool push_type(struct abc_typechecker *tc, struct type *type) {
 static bool lookup_type(struct abc_typechecker *tc, const char *name, struct type *type) {
     bool found = false;
     for (size_t i = 0; i < tc->types.len; i++) {
-        int offset = tc->types.len - (i + 1);
+        unsigned long offset = tc->types.len - (i + 1);
         struct type *t = (struct type *) tc->types.data + offset;
         if (t->marker) {
             continue;

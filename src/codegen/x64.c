@@ -1,3 +1,8 @@
+/**
+ * Translates IR to x64 assembly.
+ *
+ */
+
 #include "x64.h"
 #include "x64_regalloc.h"
 
@@ -92,7 +97,7 @@ static void create_prelude(struct x64_translator *t, struct ir_fun *ir_fun, stru
 
     // space for spilled variables (and alignment)
     long offset = regalloc->num_spilled * X64_VAR_SIZE;
-    int total = regalloc->num_spilled * X64_VAR_SIZE + regalloc->callee_saved_allocs.len * X64_VAR_SIZE + X64_VAR_SIZE;
+    int total = (regalloc->num_spilled + (int) regalloc->callee_saved_allocs.len + 1) * X64_VAR_SIZE;
     if (total % 16 != 0) {
         offset += X64_VAR_SIZE;
     }
@@ -115,12 +120,10 @@ static void create_prelude(struct x64_translator *t, struct ir_fun *ir_fun, stru
 static char *create_epilogue_label(struct x64_translator *t, char *fun_name) {
     static char *curr_fun_name = NULL;
     static char *cached = NULL;
-    if (curr_fun_name == NULL) {
+    if (curr_fun_name == NULL || strcmp(curr_fun_name, fun_name) != 0) {
         curr_fun_name = fun_name;
-    } else if (strcmp(curr_fun_name, fun_name) == 0) {
-        return cached;
     } else {
-        curr_fun_name = fun_name;
+        return cached;
     }
     int len = snprintf(NULL, 0, "%s_epilogue", fun_name);
     char *epilogue = abc_pool_alloc(t->pool, len + 1, 1);
@@ -147,7 +150,7 @@ static void create_epilogue(struct x64_translator *t, char *fun_name, struct x64
     // space for spilled variables (and alignment)
     struct x64_instr restore_instr = {.tag = X64_INSTR_STACK, .val.stack.tag = X64_STACK_POPQ};
     long offset = regalloc->num_spilled * X64_VAR_SIZE;
-    int total = regalloc->num_spilled * X64_VAR_SIZE + regalloc->callee_saved_allocs.len * X64_VAR_SIZE + X64_VAR_SIZE;
+    int total = (regalloc->num_spilled + (int) regalloc->callee_saved_allocs.len + 1) * X64_VAR_SIZE;
     if (total % 16 != 0) {
         offset += X64_VAR_SIZE;
     }
@@ -234,6 +237,7 @@ static void x64_program_translate_fun(struct x64_translator *t, struct ir_fun *i
     x64_assign_homes(t, &regalloc);
 
     // patch instructions
+    // TODO - check instruction constraints, like single memory access, etc.
 
     // end
     create_prelude(t, ir_fun, &regalloc);
@@ -530,7 +534,7 @@ static void x64_program_translate_call_expr(struct x64_translator *t, struct ir_
     abc_arr_push(&t->curr_block->x64_instrs, &instr);
 
     // restore stack
-    int num_pushed = ((int) expr->args.len - 6 > 0) ? (int) expr->args.len - 6 : 0  + (need_align ? 1 : 0);
+    int num_pushed = ((int) expr->args.len - 6 > 0) ? (int) expr->args.len - 6 : 0 + (need_align ? 1 : 0);
     if (num_pushed > 0) {
         instr.tag = X64_INSTR_BIN, instr.val.bin.tag = X64_BIN_ADDQ;
         instr.val.bin.left.tag = X64_ARG_IMM;

@@ -1,3 +1,7 @@
+/**
+ * Intermediate representation to make translation to X64 easier.
+ */
+
 #include "ir.h"
 
 #include <assert.h>
@@ -581,8 +585,8 @@ static void ir_program_print_stmt(struct ir_stmt *stmt, FILE *out) {
             if (stmt->val.decl.has_init) {
                 fprintf(out, " = ");
                 ir_program_print_expr(&stmt->val.decl.init, out);
-                fprintf(out, "\n");
             }
+            fprintf(out, "\n");
             break;
         case IR_STMT_EXPR:
             ir_program_print_expr(&stmt->val.expr.expr, out);

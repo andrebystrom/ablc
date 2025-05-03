@@ -43,7 +43,7 @@ static void alloc_page(struct abc_pool *pool, size_t size, size_t count) {
 
 void *abc_pool_alloc_aligned(struct abc_pool *pool, size_t size, size_t count, size_t alignment) {
     assert(pool != NULL);
-    pool = find_page(pool);
+    pool = find_page(pool); // TODO insert new page first, so we don't need to iterate over all pages.
     // init page if not already
     if (pool->capacity == 0) {
         alloc_page(pool, size, count);
