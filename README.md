@@ -16,7 +16,7 @@ supports:
 The following instructions have been tested on Linux:
 
 1.  cd into buildDir
-> > cd buildDir
+> cd buildDir
 2. compile src program to asm
 > ./ablc ../testdata/ok_program.al --output t.asm
 3. assemble
