@@ -1,10 +1,9 @@
 /**
  * Very basic 'register allocator' that assigns registers to variables or spills them to the stack.
- * At the moment all variables are assigned stack locations, but the register allocator is free
- * to be extended to allocate registers according to the API.
  *
  * num_params is passed so arguments passed via the stack, that is spilled, can be avoided to occur a move from
- * the passed stack location to the current functions stack.
+ * the passed stack location to the current functions stack. The first block always contains moves from the
+ * registers/stack location the arguments were passed in.
  *
  */
 
@@ -12,7 +11,6 @@
 #include "x64.h"
 
 #include <assert.h>
-#include <limits.h>
 #include <string.h>
 
 struct live_range {
@@ -43,7 +41,7 @@ static void init_reg_pool(struct abc_arr *reg_pool) {
             {.reg = X64_REG_R13, .in_use = false, .saved = true},
             {.reg = X64_REG_R14, .in_use = false, .saved = true},
     };
-    for (int i = 0; i < sizeof(entries) / sizeof(entries[0]); i++) {
+    for (size_t i = 0; i < sizeof(entries) / sizeof(entries[0]); i++) {
         abc_arr_push(reg_pool, &entries[i]);
     }
 }
@@ -62,7 +60,7 @@ static bool arg_eq(const struct x64_arg *arg, const struct x64_arg *arg2) {
     }
 }
 
-int live_range_cmp_start(void *l, void *r) {
+int live_range_cmp_start(const void *l, const void *r) {
     const struct live_range *l1 = l;
     const struct live_range *r1 = r;
     return l1->start - r1->start;
@@ -138,8 +136,7 @@ static void move_reg_constraints(struct abc_arr *ranges, struct abc_arr *dest) {
     }
 }
 
-static void remove_expired_ranges(struct x64_regalloc *regalloc, struct abc_arr *active, struct live_range *current,
-                                  struct abc_arr *regs) {
+static void remove_expired_ranges(struct abc_arr *active, struct live_range *current, struct abc_arr *regs) {
     for (size_t i = 0; i < active->len; i++) {
         struct live_range *r = (struct live_range *) active->data + i;
         if (r->end <= current->end) {
@@ -180,7 +177,7 @@ static void alloc_reg(struct x64_regalloc *regalloc, struct abc_arr *active, str
             if (c_r->arg->val.reg.reg != r_entry->reg) {
                 continue;
             }
-            if (r->start >= c_r->start || r->end >= c_r->end) {
+            if (r->start <= c_r->end && c_r->start <= r->end) {
                 can_alloc = false;
             }
             break;
@@ -207,7 +204,7 @@ static void alloc_reg(struct x64_regalloc *regalloc, struct abc_arr *active, str
     abc_arr_push(&regalloc->allocs, &alloc);
 }
 
-struct x64_regalloc x64_regalloc_new(struct x64_fun *fun, struct abc_pool *allocator, int num_params) {
+struct x64_regalloc x64_regalloc(struct x64_fun *fun, struct abc_pool *allocator, int num_params) {
     // init
     (void) num_params;
     struct x64_regalloc regalloc;
@@ -222,7 +219,7 @@ struct x64_regalloc x64_regalloc_new(struct x64_fun *fun, struct abc_pool *alloc
         struct x64_block *block = (struct x64_block *) fun->x64_blocks.data + i;
         for (size_t j = 0; j < block->x64_instrs.len; j++) {
             struct x64_instr *instr = (struct x64_instr *) block->x64_instrs.data + j;
-            calculate_live_range(&ranges, instr, (int) j);
+            calculate_live_range(&ranges, instr, (int) i);
         }
     }
     qsort(ranges.data, ranges.len, sizeof(struct live_range), live_range_cmp_start);
@@ -238,70 +235,14 @@ struct x64_regalloc x64_regalloc_new(struct x64_fun *fun, struct abc_pool *alloc
     init_reg_pool(&regs);
     for (size_t i = 0; i < ranges.len; i++) {
         struct live_range *r = (struct live_range *) ranges.data + i;
-        remove_expired_ranges(&regalloc, &active, r, &regs);
+        remove_expired_ranges(&active, r, &regs);
         alloc_reg(&regalloc, &active, r, &reg_constraints, &regs);
     }
 
-    // todo: patch spills that are arguments passed through the stack
+    // TODO: patch spills that are arguments passed through the stack to just refer to the stack location they
+    // were passed in
 
     return regalloc;
-}
-
-static void alloc_reg_for_instr(struct x64_regalloc *regalloc, struct x64_instr *instr);
-struct x64_regalloc x64_regalloc(struct x64_fun *fun, struct abc_pool *allocator, int num_params) {
-    // init
-    (void) num_params;
-    struct x64_regalloc regalloc;
-    abc_arr_init(&regalloc.allocs, sizeof(struct x64_alloc), allocator);
-    abc_arr_init(&regalloc.callee_saved_allocs, sizeof(struct x64_arg), allocator);
-    regalloc.num_spilled = 0;
-
-    for (size_t i = 0; i < fun->x64_blocks.len; i++) {
-        struct x64_block *block = (struct x64_block *) fun->x64_blocks.data + i;
-        for (size_t j = 0; j < block->x64_instrs.len; j++) {
-            struct x64_instr *instr = (struct x64_instr *) block->x64_instrs.data + j;
-            alloc_reg_for_instr(&regalloc, instr);
-        }
-    }
-    return regalloc;
-}
-
-static void alloc_reg_for_arg(struct x64_regalloc *regalloc, struct x64_arg *arg);
-static void alloc_reg_for_instr(struct x64_regalloc *regalloc, struct x64_instr *instr) {
-
-    switch (instr->tag) {
-        case X64_INSTR_BIN:
-            alloc_reg_for_arg(regalloc, &instr->val.bin.left);
-            alloc_reg_for_arg(regalloc, &instr->val.bin.right);
-            break;
-        case X64_INSTR_FAC:
-            alloc_reg_for_arg(regalloc, &instr->val.fac.right);
-            break;
-        case X64_INSTR_STACK:
-            alloc_reg_for_arg(regalloc, &instr->val.stack.arg);
-            break;
-        case X64_INSTR_NEGQ:
-            alloc_reg_for_arg(regalloc, &instr->val.neg.dest);
-            break;
-        case X64_INSTR_SETCC:
-        case X64_INSTR_JMP:
-        case X64_INSTR_JMPCC:
-        case X64_INSTR_NOARG:
-        case X64_INSTR_MOVZBQ:
-        case X64_INSTR_LEAQ:
-        case X64_INSTR_CALLQ:
-            break;
-    }
-}
-
-static void alloc_reg_for_arg(struct x64_regalloc *regalloc, struct x64_arg *arg) {
-    if (arg->tag != X64_ARG_STR || x64_regalloc_get_arg(regalloc, arg->val.str.str) != NULL) {
-        return;
-    }
-    int offset = (regalloc->num_spilled++) * X64_VAR_SIZE + X64_VAR_SIZE;
-    struct x64_arg res = {.tag = X64_ARG_DEREF, .val.deref.reg = X64_REG_RBP, .val.deref.offset = -offset};
-    struct x64_alloc alloc = {.label = arg->val.str.str, .arg = res};
-    abc_arr_push(&regalloc->allocs, &alloc);
 }
 
 struct x64_arg *x64_regalloc_get_arg(struct x64_regalloc *regalloc, char *label) {

@@ -54,7 +54,7 @@ void *abc_arr_insert_after_ptr(struct abc_arr *arr, void *where, void *data) {
     return (char *) arr->data + (index + 1) * arr->elem_size;
 }
 
-void *abc_arr_remove_at_ptr(struct abc_arr *arr, void *where) {
+void abc_arr_remove_at_ptr(struct abc_arr *arr, void *where) {
     unsigned long index = get_ptr_index(arr, where);
     unsigned long n = arr->len - index - 1;
     // 1 2 3

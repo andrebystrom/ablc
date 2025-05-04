@@ -21,7 +21,7 @@ The following instructions have been tested on Linux:
 > ./ablc ../testdata/ok_program.al --output t.asm
 3. assemble
 > as t.asm -o a.out
-4. link with libc 
+4. link with libc and generate startup code that calls main
 > gcc a.out -o a
 5. run 
 > ./a
@@ -30,11 +30,11 @@ The following instructions have been tested on Linux:
 > ./ablc <input_file.al> [--print-ast] [--print-ir] [--print-asm] <--skip-output | --output outputfile>
 
 # Todos
-- Instruction patching for x64, meaning some generated code might be invalid.
+- Instruction patching for x64, meaning some generated code might be invalid (as would flag for this).
 - Additional data types for typechecking etc, for example an environment/map type would be useful
 - Better error messages in parser and especially the typechecker
 # Possible extensions/enhancements
-1. Register allocator that actually allocates registers and does not spill every variable
+1. More advanced register allocator
 2. IR optimizations
 3. Additional types
-4. Arrays
+4. Arrays and structs
