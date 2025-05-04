@@ -35,7 +35,7 @@ int main(int argc, char **argv) {
                                {.flag = NULL, .val = 'x', .has_arg = false, .name = "print-asm"},
                                {.flag = NULL, .val = 's', .has_arg = false, .name = "skip-output"},
                                {.flag = NULL, .val = 'o', .has_arg = required_argument, .name = "output"},
-                               NULL};
+                               {0, 0, 0, 0}};
     int c;
     while ((c = getopt_long(argc, argv, "aixso:", options, NULL)) != -1) {
         switch (c) {

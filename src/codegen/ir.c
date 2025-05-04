@@ -158,6 +158,7 @@ struct ir_program ir_translate(struct ir_translator *translator, struct abc_prog
 
 static void ir_translate_fun(struct ir_translator *tr, struct abc_fun_decl *fun_decl, struct ir_fun *fun) {
     // parameters and return type is handled in init_ir_fun
+    (void) fun;
     ir_translate_block_stmt(tr, &fun_decl->body);
 }
 

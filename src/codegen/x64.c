@@ -141,7 +141,8 @@ static void create_epilogue(struct x64_translator *t, char *fun_name, struct x64
 
     // restore callee saved, in reverse order
     for (size_t i = 0; i < regalloc->callee_saved_allocs.len; i++) {
-        struct x64_arg *saved = regalloc->callee_saved_allocs.data + (regalloc->callee_saved_allocs.len - (i + 1));
+        struct x64_arg *saved =
+                (struct x64_arg *) regalloc->callee_saved_allocs.data + (regalloc->callee_saved_allocs.len - (i + 1));
         struct x64_instr instr = {.tag = X64_INSTR_STACK, .val.stack.tag = X64_STACK_POPQ};
         instr.val.stack.arg = *saved;
         abc_arr_push(&t->curr_block->x64_instrs, &instr);
@@ -172,6 +173,7 @@ static void create_epilogue(struct x64_translator *t, char *fun_name, struct x64
 /* REGISTER ALLOCATION */
 
 static void x64_assign_homes_arg(struct x64_translator *t, struct x64_regalloc *regalloc, struct x64_arg *arg) {
+    (void) t;
     if (arg->tag == X64_ARG_STR) {
         struct x64_arg *new_arg = x64_regalloc_get_arg(regalloc, arg->val.str.str);
         assert(new_arg != NULL);
@@ -206,9 +208,9 @@ static void x64_assign_homes_instr(struct x64_translator *t, struct x64_regalloc
 }
 
 static void x64_assign_homes(struct x64_translator *t, struct x64_regalloc *regalloc) {
-    for (int i = 0; i < t->curr_fun->x64_blocks.len; i++) {
+    for (size_t i = 0; i < t->curr_fun->x64_blocks.len; i++) {
         struct x64_block *block = (struct x64_block *) t->curr_fun->x64_blocks.data + i;
-        for (int j = 0; j < block->x64_instrs.len; j++) {
+        for (size_t j = 0; j < block->x64_instrs.len; j++) {
             struct x64_instr *instr = (struct x64_instr *) block->x64_instrs.data + j;
             x64_assign_homes_instr(t, regalloc, instr);
         }
@@ -218,21 +220,23 @@ static void x64_assign_homes(struct x64_translator *t, struct x64_regalloc *rega
 /* INSTRUCTION PATCHING */
 
 static void x64_program_patch_instr(struct x64_translator *t, struct x64_block *block, struct x64_instr *instr) {
+    (void) t;
     if (instr->tag == X64_INSTR_BIN && instr->val.bin.left.tag == X64_ARG_DEREF &&
-            instr->val.bin.right.tag == X64_ARG_DEREF) {
+        instr->val.bin.right.tag == X64_ARG_DEREF) {
         struct x64_instr patch = {.tag = X64_INSTR_BIN, .val.bin.tag = X64_BIN_MOVQ};
         patch.val.bin.left = instr->val.bin.left;
         patch.val.bin.right = X64_RAX;
-        abc_arr_insert_before_ptr(&block->x64_instrs, instr, &patch);
+        // current instr ptr might be invalidated by the insert
+        instr = abc_arr_insert_before_ptr(&block->x64_instrs, instr, &patch);
         (instr + 1)->val.bin.left = X64_RAX;
     }
 }
 
 static void x64_program_patch_fun(struct x64_translator *t, struct x64_fun *fun) {
-    for (int i = 0; i < t->curr_fun->x64_blocks.len; i++) {
+    for (size_t i = 0; i < fun->x64_blocks.len; i++) {
         struct x64_block *block = (struct x64_block *) t->curr_fun->x64_blocks.data + i;
         size_t len = block->x64_instrs.len;
-        for (int j = 0; j < len; j++) {
+        for (size_t j = 0; j < len; j++) {
             struct x64_instr *instr = (struct x64_instr *) block->x64_instrs.data + j;
             x64_program_patch_instr(t, block, instr);
             len = block->x64_instrs.len;
@@ -533,7 +537,7 @@ static void x64_program_translate_call_expr(struct x64_translator *t, struct ir_
     }
 
     // pass args
-    for (int i = 0; i < expr->args.len; i++) {
+    for (size_t i = 0; i < expr->args.len; i++) {
         struct x64_arg src = x64_program_translate_atom(t, (struct ir_atom *) expr->args.data + i);
         if (i < 4) {
             struct x64_arg dest = X64_REGS[X64_REG_RDI - i];
@@ -570,6 +574,7 @@ static void x64_program_translate_call_expr(struct x64_translator *t, struct ir_
 }
 
 static struct x64_arg x64_program_translate_atom(struct x64_translator *t, struct ir_atom *atom) {
+    (void) t;
     struct x64_arg arg = {0};
     switch (atom->tag) {
         case IR_ATOM_INT_LIT:

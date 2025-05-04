@@ -15,14 +15,15 @@
 static void alloc_reg_for_instr(struct x64_regalloc *regalloc, struct x64_instr *instr);
 struct x64_regalloc x64_regalloc(struct x64_fun *fun, struct abc_pool *allocator, int num_params) {
     // init
+    (void)num_params;
     struct x64_regalloc regalloc;
     abc_arr_init(&regalloc.allocs, sizeof(struct x64_alloc), allocator);
     abc_arr_init(&regalloc.callee_saved_allocs, sizeof(struct x64_arg), allocator);
     regalloc.num_spilled = 0;
 
-    for (int i = 0; i < fun->x64_blocks.len; i++) {
+    for (size_t i = 0; i < fun->x64_blocks.len; i++) {
         struct x64_block *block = (struct x64_block *)fun->x64_blocks.data + i;
-        for (int j = 0; j < block->x64_instrs.len; j++) {
+        for (size_t j = 0; j < block->x64_instrs.len; j++) {
             struct x64_instr *instr = (struct x64_instr *)block->x64_instrs.data + j;
             alloc_reg_for_instr(&regalloc, instr);
         }
@@ -69,7 +70,7 @@ static void alloc_reg_for_arg(struct x64_regalloc *regalloc, struct x64_arg *arg
 }
 
 struct x64_arg *x64_regalloc_get_arg(struct x64_regalloc *regalloc, char *label) {
-    for (int i = 0; i < regalloc->allocs.len; i++) {
+    for (size_t i = 0; i < regalloc->allocs.len; i++) {
         struct x64_alloc *alloc = (struct x64_alloc *)regalloc->allocs.data + i;
         if (strcmp(label, alloc->label) == 0) {
             return &alloc->arg;
