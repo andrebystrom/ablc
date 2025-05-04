@@ -25,7 +25,7 @@ void do_compile(struct compile_options *options);
 void usage() {
     fprintf(stderr, "usage ./ablc <input_file.al> [--print-ast] [--print-ir] [--print-asm] "
                     "<--skip-output | --output outputfile>\n");
-    exit(1);
+    exit(EXIT_FAILURE);
 }
 
 int main(int argc, char **argv) {
@@ -114,6 +114,7 @@ void do_compile(struct compile_options *options) {
         FILE *f = fopen(options->output_file, "w+");
         if (f == NULL) {
             fprintf(stderr, "failed to open output file\n");
+            exit(EXIT_FAILURE);
         }
         x64_program_print(&x64_program, f);
         fclose(f);
