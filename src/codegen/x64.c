@@ -334,6 +334,7 @@ static void x64_program_translate_stmt(struct x64_translator *t, struct ir_stmt 
             // issue call
             instr.tag = X64_INSTR_CALLQ;
             instr.val.callq.label = "printf";
+            instr.val.callq.arity = 2;
             abc_arr_push(&t->curr_block->x64_instrs, &instr);
             // remove alignment
             instr.tag = X64_INSTR_STACK, instr.val.stack.tag = X64_STACK_POPQ;
@@ -559,7 +560,7 @@ static void x64_program_translate_call_expr(struct x64_translator *t, struct ir_
     }
 
     // call
-    instr.tag = X64_INSTR_CALLQ, instr.val.callq.label = expr->label;
+    instr.tag = X64_INSTR_CALLQ, instr.val.callq.label = expr->label, instr.val.callq.arity = (int) expr->args.len;
     abc_arr_push(&t->curr_block->x64_instrs, &instr);
 
     // restore stack

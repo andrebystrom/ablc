@@ -169,6 +169,7 @@ struct x64_instr_jmpcc {
 
 struct x64_instr_callq {
     char *label;
+    int arity;
 };
 
 enum x64_noarg_instr_tag {

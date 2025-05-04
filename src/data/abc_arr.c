@@ -48,9 +48,18 @@ void *abc_arr_insert_after_ptr(struct abc_arr *arr, void *where, void *data) {
     abc_arr_push(arr, data);
     unsigned long index = get_ptr_index(arr, where);
     unsigned long n = arr->len - 2 - index;
-    memmove((char *) arr->data + (index + 2) * arr->elem_size + 2, (char *) arr->data + (index + 1) * arr->elem_size, n * arr->elem_size);
+    memmove((char *) arr->data + (index + 2) * arr->elem_size + 2, (char *) arr->data + (index + 1) * arr->elem_size,
+            n * arr->elem_size);
     memmove((char *) arr->data + (index + 1) * arr->elem_size, data, arr->elem_size);
     return (char *) arr->data + (index + 1) * arr->elem_size;
+}
+
+void *abc_arr_remove_at_ptr(struct abc_arr *arr, void *where) {
+    unsigned long index = get_ptr_index(arr, where);
+    unsigned long n = arr->len - index - 1;
+    // 1 2 3
+    memmove((char *) arr->data + index * arr->elem_size, (char *) arr->data + (index + 1) * arr->elem_size, n * arr->elem_size);
+    arr->len = arr->len - 1;
 }
 
 void abc_arr_migrate_pool(struct abc_arr *arr, struct abc_pool *pool) {

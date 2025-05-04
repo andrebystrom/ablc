@@ -14,7 +14,7 @@ sources = [
         'src/codegen/ir.c',
         'src/codegen/x64.c',
         'src/codegen/x64_regalloc.c',
-        'src/codegen/x64_constants.c'
+        'src/codegen/x64_constants.c',
 ]
 
 ablc = executable('ablc', sources, c_args: '-fsanitize=address,leak,undefined', link_args: '-fsanitize=address,leak,undefined')
