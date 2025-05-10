@@ -22,7 +22,7 @@ struct compile_options {
 
 void do_compile(struct compile_options *options);
 
-void usage() {
+void usage(void) {
     fprintf(stderr, "usage ./ablc <input_file.al> [--print-ast] [--print-ir] [--print-asm] "
                     "<--skip-output | --output outputfile>\n");
     exit(EXIT_FAILURE);

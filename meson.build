@@ -2,8 +2,6 @@ project('ablc', 'c',
         version : '1.0.0',
         default_options : ['warning_level=3', 'c_std=gnu11'])
 
-add_global_arguments('-Db_sanitize=address,leak,undefined', language : 'c')
-
 sources = [
         'src/main.c',
         'src/data/abc_arr.c',
@@ -17,6 +15,11 @@ sources = [
         'src/codegen/x64_constants.c',
 ]
 
-ablc = executable('ablc', sources, c_args: '-fsanitize=address,leak,undefined', link_args: '-fsanitize=address,leak,undefined')
-#ablc = executable('ablc', sources)
+if build_machine.system() == 'darwin'
+	ablc = executable('ablc', sources)
+else
+	add_global_arguments('-Db_sanitize=address,leak,undefined', language : 'c')
+	ablc = executable('ablc', sources, c_args: '-fsanitize=address,leak,undefined', link_args: '-fsanitize=address,leak,undefined')
+endif
+
 test('test', ablc)
